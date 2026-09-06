@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /signup
+
+Sitemap: https://meooow.tech/sitemap.xml
+

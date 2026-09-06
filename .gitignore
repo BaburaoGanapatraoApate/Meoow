@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+dist-release/
+release/
+out/
+
+# Local caches / temporary work
+.eb-cache/
+scratch/
+
+# Test artifacts
+test_report.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!backend/.env.example
+!website/.env.example
+
+# Backend / website local environment files
+backend/.env
+backend/.env.*
+website/.env
+website/.env.*
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local verification / audit scripts
+backend/src/auditTask14.ts
+backend/src/test*.ts
+website/test*.mjs

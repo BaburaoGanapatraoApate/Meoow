@@ -1,0 +1,51 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && node -e \"const fs=require('fs'); const p='dist/db/migrations'; if(fs.existsSync('src/db/migrations')){fs.mkdirSync(p,{recursive:true}); for(const f of fs.readdirSync('src/db/migrations')) if(f.endsWith('.sql')) fs.copyFileSync('src/db/migrations/'+f, p+'/'+f);}\"",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "start": "node dist/server.js",
+    "admin:bootstrap": "tsx src/db/bootstrapAdmin.ts",
+    "test:admin": "tsx src/testAdminProviderFriend.ts",
+    "test:task15": "tsx src/testCreditPackagesFulfillment.ts",
+    "test:payments": "tsx src/testPaymentInfrastructure.ts",
+    "test:credits": "tsx src/testCredits.ts",
+    "test:credit-endpoints": "tsx src/testCreditEndpoints.ts",
+    "test:security": "tsx src/testSecurity.ts",
+    "test:groq": "tsx src/testGroqGateway.ts",
+    "test:deepgram": "tsx src/testDeepgramGateway.ts",
+    "test:auth": "tsx src/testAuth.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "groq-sdk": "^1.6.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0",
+    "razorpay": "^2.9.8",
+    "ws": "^8.21.3",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.4.1",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

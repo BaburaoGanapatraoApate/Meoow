@@ -1,0 +1,319 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Meow Audio Capture</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; media-src 'self' blob:; worker-src 'self';"
+    />
+  </head>
+  <body>
+    <script>
+      /**
+       * Hidden Capture Window Script
+       * Captures system loopback audio and streams raw PCM to the main window
+       * via IPC (captureAPI bridge).
+       *
+       * Audio pipeline (replaces deprecated ScriptProcessorNode):
+       *   MediaStreamSource → AudioWorkletNode (pcm-capture) → MessagePort → IPC
+       *
+       * The AudioWorklet (capture-worklet.js) runs on a dedicated audio
+       * rendering thread, so it is not affected by main-thread jitter or the
+       * Chromium deprecation of ScriptProcessorNode.
+       *
+       * Includes auto-restart logic with exponential backoff.
+       * Recovers from AudioContext suspension (Windows device change).
+       */
+
+      let desktopStream = null;
+      let audioStream = null;
+      let audioContext = null;
+      let workletNode = null;  // AudioWorkletNode (replaces scriptProcessor)
+      let sourceNode = null;
+      let isCapturing = false;
+
+      // Auto-restart state
+      const MAX_RETRIES = 8;              // was 3 — device changes can trigger several rapid retries
+      const BASE_RETRY_DELAY_MS = 1000;  // backoff: 1s, 2s, 4s, 8s …
+      const STABLE_THRESHOLD_MS = 30000; // reset retry count after 30s stable
+      let retryCount = 0;
+      let stableTimer = null;
+      let isUserStopped = false;
+
+      /**
+       * Clean up all audio resources without sending IPC notifications.
+       * Used internally before a restart attempt.
+       */
+      function cleanupAudioResources() {
+        if (workletNode) {
+          try {
+            // Tell the worklet processor to stop cleanly before disconnecting
+            workletNode.port.postMessage("stop");
+            workletNode.disconnect();
+          } catch (_) {}
+          workletNode = null;
+        }
+
+        if (sourceNode) {
+          try { sourceNode.disconnect(); } catch (_) {}
+          sourceNode = null;
+        }
+
+        if (audioContext && audioContext.state !== "closed") {
+          try { audioContext.close(); } catch (_) {}
+          audioContext = null;
+        }
+
+        if (audioStream && audioStream !== desktopStream) {
+          try { audioStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        }
+        audioStream = null;
+
+        if (desktopStream) {
+          try { desktopStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+          desktopStream = null;
+        }
+
+        if (stableTimer) {
+          clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+
+        isCapturing = false;
+      }
+
+      /**
+       * Called when the audio stream ends unexpectedly (not by user action).
+       * Attempts auto-restart with exponential backoff.
+       */
+      function handleUnexpectedStreamEnd(reason) {
+        if (isUserStopped || !isCapturing) return;
+
+        console.warn("[Capture] Audio stream ended unexpectedly:", reason);
+        cleanupAudioResources();
+
+        if (retryCount >= MAX_RETRIES) {
+          console.error(
+            "[Capture] Max retries reached (" + MAX_RETRIES + "), giving up",
+          );
+          window.captureAPI.notifyCaptureError(
+            "Audio capture stopped by system after " +
+              MAX_RETRIES +
+              " restart attempts",
+          );
+          window.captureAPI.notifyCaptureStopped();
+          retryCount = 0;
+          return;
+        }
+
+        const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+        retryCount++;
+        console.log(
+          "[Capture] Attempting restart " +
+            retryCount +
+            "/" +
+            MAX_RETRIES +
+            " in " +
+            delay +
+            "ms...",
+        );
+        window.captureAPI.notifyCaptureRestarting(retryCount, MAX_RETRIES);
+
+        setTimeout(() => {
+          if (isUserStopped) return;
+          startCapture();
+        }, delay);
+      }
+
+      async function startCapture() {
+        if (isCapturing) {
+          console.log("[Capture] Already capturing");
+          return;
+        }
+
+        isUserStopped = false;
+
+        try {
+          console.log("[Capture] Starting audio capture...");
+
+          // Step 1: Request display media.
+          // Electron's setDisplayMediaRequestHandler intercepts this call.
+          console.log("[Capture] Requesting display media...");
+          desktopStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+          });
+
+          // Keep video track disabled (saves resources) but alive —
+          // stopping it can terminate the capture session on macOS.
+          desktopStream.getVideoTracks().forEach((track) => {
+            track.enabled = false;
+            track.onended = () => {
+              console.warn("[Capture] Video track ended unexpectedly");
+              handleUnexpectedStreamEnd("Video track ended by system");
+            };
+          });
+
+          // Step 2: Determine audio source.
+          const systemAudioTracks = desktopStream.getAudioTracks();
+
+          if (systemAudioTracks.length > 0) {
+            audioStream = desktopStream;
+            console.log(
+              "[Capture] System audio available:",
+              systemAudioTracks[0].label,
+            );
+          } else {
+            // Do not fall back to the microphone here — this stream is
+            // labelled as screen/interviewer audio in the renderer.
+            throw new Error(
+              "No system audio track was provided by display capture",
+            );
+          }
+
+          const audioTracks = audioStream.getAudioTracks();
+          if (audioTracks.length === 0) {
+            throw new Error("No audio tracks found");
+          }
+
+          console.log("[Capture] Audio track:", audioTracks[0].label);
+
+          // Monitor audio track for system-level termination
+          audioTracks[0].onended = () => {
+            console.warn("[Capture] Audio track ended unexpectedly");
+            handleUnexpectedStreamEnd("Audio track ended by system");
+          };
+
+          // Step 3: Build the AudioContext + AudioWorklet pipeline.
+          audioContext = new AudioContext({ sampleRate: 48000 });
+          if (audioContext.state === "suspended") {
+            try { await audioContext.resume(); } catch (_) {}
+          }
+
+          // #4 fix: detect device change / audio graph interruption.
+          // On Windows, 'suspended' is a normal transient state (device wakes, etc.).
+          // We try to resume first. Only restart on 'closed', or if we cannot
+          // recover from 'suspended' after 3 seconds.
+          let suspendedTimer = null;
+          audioContext.addEventListener("statechange", () => {
+            const state = audioContext ? audioContext.state : "closed";
+            console.log("[Capture] AudioContext state changed to:", state);
+            if (!isCapturing || isUserStopped) return;
+
+            if (state === "suspended" || state === "interrupted") {
+              // Try to resume first
+              if (audioContext) {
+                audioContext.resume().then(() => {
+                  if (suspendedTimer) { clearTimeout(suspendedTimer); suspendedTimer = null; }
+                  console.log("[Capture] AudioContext resumed successfully");
+                }).catch(() => {});
+              }
+              // If still suspended after 3s, do hard restart
+              if (!suspendedTimer) {
+                suspendedTimer = setTimeout(() => {
+                  suspendedTimer = null;
+                  if (!isCapturing || isUserStopped) return;
+                  const currentState = audioContext ? audioContext.state : "closed";
+                  if (currentState === "suspended" || currentState === "interrupted" || currentState === "closed") {
+                    handleUnexpectedStreamEnd("AudioContext stuck in: " + currentState);
+                  }
+                }, 3000);
+              }
+            } else if (state === "running") {
+              if (suspendedTimer) { clearTimeout(suspendedTimer); suspendedTimer = null; }
+            } else if (state === "closed") {
+              if (suspendedTimer) { clearTimeout(suspendedTimer); suspendedTimer = null; }
+              handleUnexpectedStreamEnd("AudioContext closed");
+            }
+          });
+
+          // Load the AudioWorklet module (served from the same origin as capture.html).
+          // 'self' in the CSP covers this URL.
+          await audioContext.audioWorklet.addModule("./capture-worklet.js");
+
+          sourceNode = audioContext.createMediaStreamSource(audioStream);
+
+          // AudioWorkletNode replaces the deprecated ScriptProcessorNode.
+          // It runs on a dedicated audio rendering thread — not the JS main
+          // thread — so it cannot be starved by UI work or Chromium GC.
+          workletNode = new AudioWorkletNode(audioContext, "pcm-capture");
+
+          // Receive PCM frames from the audio thread and relay them via IPC.
+          workletNode.port.onmessage = (event) => {
+            if (!isCapturing) return;
+            // event.data is an ArrayBuffer (transferred, zero-copy from worklet)
+            const samples = Array.from(new Float32Array(event.data));
+            window.captureAPI.sendAudioData(samples);
+          };
+
+          // Connect: MediaStreamSource → WorkletNode → destination
+          // Connecting to destination is required to keep the audio graph alive.
+          sourceNode.connect(workletNode);
+          workletNode.connect(audioContext.destination);
+
+          isCapturing = true;
+
+          // Reset retry count after 30 s of stable capture
+          stableTimer = setTimeout(() => {
+            if (isCapturing) {
+              console.log(
+                "[Capture] Stream stable for 30s, resetting retry count",
+              );
+              retryCount = 0;
+            }
+          }, STABLE_THRESHOLD_MS);
+
+          console.log(
+            "[Capture] Audio capture started successfully (AudioWorklet mode)",
+          );
+          window.captureAPI.notifyCaptureStarted();
+        } catch (error) {
+          console.error("[Capture] Failed to start capture:", error);
+
+          if (retryCount > 0 && retryCount < MAX_RETRIES && !isUserStopped) {
+            const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+            retryCount++;
+            console.log(
+              "[Capture] Restart failed, retrying " +
+                retryCount +
+                "/" +
+                MAX_RETRIES +
+                " in " +
+                delay +
+                "ms...",
+            );
+            window.captureAPI.notifyCaptureRestarting(retryCount, MAX_RETRIES);
+            setTimeout(() => {
+              if (!isUserStopped) startCapture();
+            }, delay);
+          } else {
+            window.captureAPI.notifyCaptureError(
+              error.message || "Failed to start capture",
+            );
+          }
+        }
+      }
+
+      function stopCapture() {
+        console.log("[Capture] Stopping audio capture...");
+        isUserStopped = true;
+        cleanupAudioResources();
+        retryCount = 0;
+        window.captureAPI.notifyCaptureStopped();
+      }
+
+      // Set up IPC listeners
+      window.captureAPI.onStartCapture(() => {
+        retryCount = 0;
+        startCapture();
+      });
+
+      window.captureAPI.onStopCapture(() => {
+        stopCapture();
+      });
+
+      console.log("[Capture] Capture window initialized and ready (AudioWorklet mode)");
+    </script>
+  </body>
+</html>

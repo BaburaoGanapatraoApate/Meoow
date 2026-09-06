@@ -1,0 +1,30 @@
+{
+  "name": "coprep-browser",
+  "productName": "cohost",
+  "version": "2.2.13",
+  "description": "cohost is an AI-powered interview copilot for job seekers.",
+  "author": "cohost <support@coprep.ai> (https://www.coprep.ai)",
+  "main": "dist/electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coprep-ai/CoPrep-desktop-releases.git"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/coprep-ai/CoPrep-desktop-releases/issues"
+  },
+  "homepage": "https://github.com/coprep-ai/CoPrep-desktop-releases#readme",
+  "dependencies": {
+    "@deepgram/sdk": "^5.3.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "electron-updater": "^6.8.3",
+    "koffi": "^3.0.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.3"
+  }
+}

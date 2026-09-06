@@ -1,0 +1,64 @@
+services:
+  # ============================================================================
+  # SERVICE 1: MEOOW API & WEBSOCKET BACKEND (Render Web Service)
+  # ============================================================================
+  - type: web
+    name: meoow-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        value: Meoow
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_MODE
+        value: test
+      - key: PROVIDER_ENCRYPTION_KEY
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+
+  # ============================================================================
+  # SERVICE 2: MEOOW PUBLIC WEBSITE (Render Static Site)
+  # ============================================================================
+  - type: web
+    name: meoow-web
+    runtime: static
+    rootDir: website
+    region: oregon
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_PUBLIC_WINDOWS_DOWNLOAD_URL
+        value: ""

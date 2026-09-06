@@ -1,0 +1,54 @@
+appId: com.meoow.app
+productName: Meoow
+directories:
+  buildResources: resources
+  output: dist-release
+files:
+  - dist/**/*
+  - package.json
+  - "!node_modules/**/*"
+  - "!src/**/*"
+forceCodeSigning: false
+extraResources:
+  - from: node_modules/koffi
+    to: koffi
+    filter:
+      - "**/*"
+  - from: .env
+    to: .env
+  - from: resources/icon.ico
+    to: icon.ico
+  - from: resources/logo.ico
+    to: logo.ico
+  - from: resources/icon.png
+    to: icon.png
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-Setup.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: resources/installerIcon.ico
+  uninstallerIcon: resources/uninstallerIcon.ico
+  installerHeaderIcon: resources/installerIcon.ico
+  shortcutName: Meoow
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: src/assets/logo.icns
+  category: public.app-category.productivity
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  icon: src/assets/logo.png
+  category: Utility
