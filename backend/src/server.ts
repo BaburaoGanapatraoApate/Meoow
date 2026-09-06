@@ -64,7 +64,8 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow non-browser clients (Electron desktop background fetch, curl, server-to-server)
-      if (!origin) {
+      // and packaged Electron renderer fetch requests where Origin is "null"
+      if (!origin || origin === "null") {
         return callback(null, true);
       }
 
