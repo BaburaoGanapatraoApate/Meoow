@@ -45,7 +45,7 @@ const FINALIZE_DRAIN = 100;
 // ── Inner app component (uses toast context) ──
 function MeowApp() {
   const toast = useToast();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, refreshUser } = useAuth();
 
   // ── State ──
   const [isSessionStarted, setIsSessionStarted] = useState(false);
@@ -538,6 +538,7 @@ function MeowApp() {
             setCurrentStreamingAnswer('');
             setCurrentStreamingScreenshot(null);
             streamingAnswerRef.current = '';
+            refreshUser?.().catch?.(() => {});
           },
           onError: (err) => {
             setPendingCopilotWork(n => Math.max(0, n - 1));
@@ -619,6 +620,9 @@ function MeowApp() {
       setCurrentStreamingAnswer('');
       setCurrentStreamingScreenshot(null);
       clearSessionData();
+      try {
+        await refreshUser?.();
+      } catch {}
       setIsEndingActiveSession(false);
       setIsShowingSetup(true);
       toast.success('Session ended');
