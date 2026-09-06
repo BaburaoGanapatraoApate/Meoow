@@ -1,4 +1,4 @@
-﻿name: Deploy Meoow Website
+name: Deploy Meoow Website
 
 on:
   push:
