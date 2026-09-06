@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { MAIN_NAV } from '../../data/navigation';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../context/AuthContext';
-import { Menu, X, ArrowRight, Sparkles, LogOut, Download } from 'lucide-react';
+import { Menu, X, ArrowRight, Sparkles, LogOut, Download, Shield } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -74,6 +74,16 @@ export const Navbar: React.FC = () => {
         <div className="hidden lg:flex items-center gap-3">
           {isAuthenticated && user ? (
             <div className="flex items-center gap-2.5">
+              {user.role === 'admin' && (
+                <Link
+                  to="/admin"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-100 border border-purple-300 text-xs font-bold text-purple-800 hover:bg-purple-200 transition"
+                  title="Admin Dashboard"
+                >
+                  <Shield className="w-3.5 h-3.5 text-purple-700" />
+                  <span>Admin</span>
+                </Link>
+              )}
               <Link
                 to="/credits"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-purple-50 border border-brand-purple-200 text-xs font-bold text-brand-purple-700 hover:bg-brand-purple-100 transition"
@@ -162,6 +172,18 @@ export const Navbar: React.FC = () => {
                     {user.usageMode === 'unlimited' ? 'Unlimited' : `${user.credits} Credits`}
                   </span>
                 </div>
+                {user.role === 'admin' && (
+                  <Link
+                    to="/admin"
+                    className="p-2.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-between text-xs font-bold text-purple-800 hover:bg-purple-100 transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-purple-700" />
+                      <span>Admin Dashboard</span>
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                )}
                 <Button href="/download" variant="primary" size="md" className="w-full justify-center">
                   <Download className="w-4 h-4 mr-1.5" />
                   Download Windows Client

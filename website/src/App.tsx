@@ -20,6 +20,8 @@ import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { DownloadPage } from './pages/DownloadPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { AdminPage } from './pages/AdminPage';
+import { AdminRoute } from './components/auth/AdminRoute';
 
 export const App: React.FC = () => {
   return (
@@ -42,6 +44,14 @@ export const App: React.FC = () => {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/download" element={<DownloadPage />} />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </PageWrapper>
