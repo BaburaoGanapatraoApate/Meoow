@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -22,6 +22,9 @@ import {
 
 export const LoginPage: React.FC = () => {
   const { isAuthenticated, user, setAuthSession, logout } = useAuth();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const redirectUrl = searchParams.get('redirect');
 
   // Login Form state
   const [email, setEmail] = useState('');
@@ -74,6 +77,10 @@ export const LoginPage: React.FC = () => {
     try {
       const result = await authApi.login(trimmedEmail, password);
       setAuthSession(result.token, result.user);
+      if (redirectUrl && redirectUrl.startsWith('/')) {
+        navigate(redirectUrl, { replace: true });
+        return;
+      }
       setCurrentStep('success');
     } catch (err: any) {
       if (err.requiresVerification || err.status === 403) {
@@ -109,6 +116,10 @@ export const LoginPage: React.FC = () => {
     try {
       const result = await authApi.verifyEmail(email.trim().toLowerCase(), cleanOtp);
       setAuthSession(result.token, result.user);
+      if (redirectUrl && redirectUrl.startsWith('/')) {
+        navigate(redirectUrl, { replace: true });
+        return;
+      }
       setCurrentStep('success');
     } catch (err: any) {
       if (err.status === 400 || err.status === 401) {
@@ -148,6 +159,9 @@ export const LoginPage: React.FC = () => {
 
   // 1. Authenticated State View
   if (isAuthenticated && user) {
+    if (redirectUrl && redirectUrl.startsWith('/')) {
+      return <Navigate to={redirectUrl} replace />;
+    }
     return (
       <div className="py-16 sm:py-24 px-4 sm:px-6 lg:px-8 max-w-md mx-auto space-y-8">
         <div className="text-center space-y-3">

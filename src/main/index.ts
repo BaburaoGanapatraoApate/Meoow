@@ -6,9 +6,7 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env from the project root (works both in dev and packed app)
-// In dev: process.cwd() = D:\Meow
-// In packed: app resources are in app.asar, but .env should be alongside it
+// Load .env from project root if present (dev / local testing)
 import { config as dotenvConfig } from "dotenv";
 import path from "path";
 import fs from "fs";
@@ -21,7 +19,6 @@ const _envPaths = [
   path.join(__dirname, "..", "..", "..", ".env"),           // dev: dist/electron/main/ -> root
   path.join(__dirname, "..", "..", ".env"),                  // fallback
   path.join(process.cwd(), ".env"),                          // cwd fallback
-  "D:\\Meow\\.env",                                          // local project root
 ].filter(Boolean);
 
 for (const _p of _envPaths) {
@@ -316,16 +313,19 @@ function createWindow() {
   win.setSkipTaskbar(true);
 
   const isDevMode = !!process.env.VITE_DEV_SERVER_URL;
-  const scriptSrc = isDevMode ? "script-src 'self' 'unsafe-inline' 'unsafe-eval';" : "script-src 'self' 'unsafe-inline';";
+  const scriptSrc = isDevMode
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com;"
+    : "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com;";
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
           "default-src 'self' http://localhost:* blob: filesystem:;" +
-          "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:* blob: filesystem:;" +
+          "connect-src 'self' https://api.meooow.tech wss://api.meooow.tech https://api.razorpay.com https://checkout.razorpay.com https://lumberjack.razorpay.com http://localhost:* ws://localhost:* wss://localhost:* blob: filesystem:;" +
           "media-src 'self' http://localhost:* blob: filesystem:;" +
-          "img-src 'self' blob: data: filesystem:;" +
+          "img-src 'self' blob: data: filesystem: https://*.razorpay.com;" +
+          "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com;" +
           scriptSrc +
           "style-src 'self' 'unsafe-inline';",
         ],

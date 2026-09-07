@@ -7,7 +7,11 @@ import { AdminDashboardModal } from './admin/AdminDashboardModal';
 import logoImg from '../assets/logo.png';
 
 interface HeaderProps {
-  onStart: () => void;
+  onStart?: () => void;
+  isShowingSetup?: boolean;
+  isStartingSession?: boolean;
+  onStartInterview?: () => void;
+  onCancelSetup?: () => void;
   isSessionStarted: boolean;
   selectedLanguage: string;
   onLanguageChange: (lang: string) => void;
@@ -26,6 +30,10 @@ interface HeaderProps {
 
 export default function Header({
   onStart,
+  isShowingSetup = false,
+  isStartingSession = false,
+  onStartInterview,
+  onCancelSetup,
   isSessionStarted,
   selectedLanguage,
   onLanguageChange,
@@ -391,7 +399,46 @@ export default function Header({
             <button type="button" disabled className="start-button" data-window-interactive="true">Loading...</button>
           ) : hasScreenPermission ? (
             <div className="pre-session-controls" data-window-interactive="true">
-              <button type="button" onClick={onStart} className="start-button" data-window-interactive="true">Start Interview</button>
+              {isShowingSetup ? (
+                <>
+                  <button
+                    type="submit"
+                    form="session-setup-form"
+                    onClick={(e) => {
+                      const form = document.getElementById('session-setup-form') as HTMLFormElement | null;
+                      if (form) {
+                        e.preventDefault();
+                        form.requestSubmit();
+                      }
+                    }}
+                    className="start-session-button"
+                    disabled={isStartingSession}
+                    title="Start Live Interview Session"
+                    data-window-interactive="true"
+                  >
+                    {isStartingSession ? 'Starting...' : 'Start Session'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCancelSetup || onStart}
+                    className="cancel-setup-button"
+                    title="Cancel and close setup"
+                    data-window-interactive="true"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onStartInterview || onStart}
+                  className="start-button"
+                  title="Configure and start interview"
+                  data-window-interactive="true"
+                >
+                  Start Interview
+                </button>
+              )}
               {renderMenu()}
               <button type="button" onClick={() => window.meow?.quitApp?.()} className="close-app-button" title="Quit Application" data-window-interactive="true">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

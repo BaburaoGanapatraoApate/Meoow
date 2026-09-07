@@ -14,8 +14,6 @@ extraResources:
     to: koffi
     filter:
       - "**/*"
-  - from: .env
-    to: .env
   - from: resources/icon.ico
     to: icon.ico
   - from: resources/logo.ico

@@ -273,9 +273,18 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
           <h2 className="session-setup-title">Configure Your Session</h2>
           <p className="session-setup-subtitle">Set up your personalized interview assistant</p>
         </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="session-setup-close-btn"
+          title="Close Setup"
+          aria-label="Close Setup"
+        >
+          ✕
+        </button>
       </div>
 
-      <form className="session-setup-form" onSubmit={handleSubmit}>
+      <form id="session-setup-form" className="session-setup-form" onSubmit={handleSubmit}>
         <div className="session-setup-grid">
           <label className="session-setup-field">
             <span>Job Title *</span>
@@ -489,14 +498,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
             onClick={onCancel}
             disabled={isStarting}
           >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="session-setup-primary-button"
-            disabled={isStarting || isParsingResume}
-          >
-            {isStarting ? 'Starting...' : 'Start Session'}
+            Cancel Setup
           </button>
         </div>
       </form>

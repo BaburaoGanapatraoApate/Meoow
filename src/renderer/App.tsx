@@ -56,7 +56,7 @@ function MeowApp() {
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [resumeText, setResumeText] = useState('');
-  const [isShowingSetup, setIsShowingSetup] = useState(true);
+  const [isShowingSetup, setIsShowingSetup] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('en');
   const [autoAnswer, setAutoAnswer] = useState(true);
@@ -624,7 +624,7 @@ function MeowApp() {
         await refreshUser?.();
       } catch {}
       setIsEndingActiveSession(false);
-      setIsShowingSetup(true);
+      setIsShowingSetup(false);
       toast.success('Session ended');
     }
   };
@@ -722,6 +722,10 @@ function MeowApp() {
     <div className="app-container">
       <Header
         onStart={() => setIsShowingSetup(prev => !prev)}
+        isShowingSetup={isShowingSetup}
+        isStartingSession={isStartingSession}
+        onStartInterview={() => setIsShowingSetup(true)}
+        onCancelSetup={() => setIsShowingSetup(false)}
         isSessionStarted={isSessionStarted}
         selectedLanguage={selectedLanguage}
         onLanguageChange={setSelectedLanguage}
