@@ -33,6 +33,10 @@ export const DownloadPage: React.FC = () => {
       ? envDownloadUrl.trim()
       : OFFICIAL_WINDOWS_DOWNLOAD_URL;
 
+  const handleDownload = () => {
+    window.location.href = publicDownloadUrl;
+  };
+
   return (
     <div className="space-y-20 sm:space-y-28 py-12">
       {/* 1. HERO DOWNLOAD BOX */}
@@ -87,14 +91,14 @@ export const DownloadPage: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <a
-              href={publicDownloadUrl}
-              download={WINDOWS_INSTALLER_FILENAME}
-              className="inline-flex items-center justify-center w-full px-6 py-4 rounded-xl font-bold bg-brand-purple-600 text-white hover:bg-brand-purple-700 shadow-lg shadow-brand-purple-500/25 transition-all text-base sm:text-lg group"
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="inline-flex items-center justify-center w-full px-6 py-4 rounded-xl font-bold bg-brand-purple-600 text-white hover:bg-brand-purple-700 shadow-lg shadow-brand-purple-500/25 transition-all text-base sm:text-lg group cursor-pointer"
             >
               <Download className="w-5 h-5 mr-2 group-hover:-translate-y-0.5 transition-transform" />
               Download Windows Client (.exe)
-            </a>
+            </button>
 
             <div className="text-[12px] text-slate-500 text-center space-y-1.5 pt-1">
               <div className="font-medium text-slate-600">
