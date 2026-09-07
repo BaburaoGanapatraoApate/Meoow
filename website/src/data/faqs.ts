@@ -27,6 +27,10 @@ export const HOME_FAQS: FaqItem[] = [
   {
     question: 'What operating systems are supported?',
     answer: 'Meoow is currently built as a dedicated native desktop application for 64-bit Windows 10 and Windows 11 systems.'
+  },
+  {
+    question: 'Is Meoow also known as Meooow, Meoow Tech, or Meow AI?',
+    answer: 'Yes. While the official brand is Meoow (Meoow AI) and our official domain is meooow.tech, users and engineers frequently search for us as Meooow, Meoow Tech, Meooow Tech, Meow, or Meow AI. All of these names refer to the same real-time AI interview copilot and preparation assistant platform.'
   }
 ];
 
@@ -117,6 +121,10 @@ export const ABOUT_FAQS: FaqItem[] = [
   {
     question: 'What is the philosophy behind Meoow?',
     answer: 'We believe AI should empower candidates with structured thinking, hints, and complexity validation rather than replacing human learning. That’s why we focus on fast, transparent, and student-accessible tooling.'
+  },
+  {
+    question: 'How is the brand name spelled — Meoow or Meooow?',
+    answer: 'Our official product brand is Meoow (also referred to as Meoow AI or Meoow Tech). To secure a memorable global web presence, our official website is hosted at meooow.tech. Whether you search for Meoow, Meooow, Meoow Tech, Meooow Tech, Meow, or Meow AI, you have reached the official home of our AI interview copilot.'
   }
 ];
 

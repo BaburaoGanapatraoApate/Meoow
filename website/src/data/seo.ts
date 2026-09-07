@@ -20,6 +20,15 @@ export interface PageSeoConfig {
 export const DEFAULT_OG_IMAGE = `${CANONICAL_DOMAIN}/og-meoow.png`;
 
 export const GLOBAL_KEYWORDS = [
+  'Meoow',
+  'Meoow AI',
+  'Meooow',
+  'Meoow Tech',
+  'Meooow Tech',
+  'Meow',
+  'Meow AI',
+  'Meooow AI',
+  'Meooow.tech',
   'AI interview help',
   'AI interview assistant',
   'AI interview preparation',
@@ -42,6 +51,16 @@ export const getGlobalOrganizationSchema = () => ({
   '@context': 'https://schema.org',
   '@type': 'Organization',
   name: BRAND_NAME,
+  alternateName: [
+    'Meoow AI',
+    'Meooow',
+    'Meooow AI',
+    'Meoow Tech',
+    'Meooow Tech',
+    'Meow',
+    'Meow AI',
+    'Meooow.tech',
+  ],
   legalName: 'Meoow AI Technologies',
   url: CANONICAL_DOMAIN,
   logo: `${CANONICAL_DOMAIN}/logo.png`,
@@ -58,6 +77,16 @@ export const getWebSiteSchema = () => ({
   '@context': 'https://schema.org',
   '@type': 'WebSite',
   name: PRODUCT_NAME,
+  alternateName: [
+    'Meoow',
+    'Meooow',
+    'Meooow AI',
+    'Meoow Tech',
+    'Meooow Tech',
+    'Meow',
+    'Meow AI',
+    'Meooow.tech',
+  ],
   url: CANONICAL_DOMAIN,
   description: 'Real-Time AI Interview Copilot & Preparation Assistant for Software Engineers',
   potentialAction: {
@@ -71,6 +100,15 @@ export const getSoftwareApplicationSchema = () => ({
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
   name: PRODUCT_NAME,
+  alternateName: [
+    'Meoow',
+    'Meooow',
+    'Meoow Tech',
+    'Meooow Tech',
+    'Meow',
+    'Meow AI',
+    'Meooow AI',
+  ],
   operatingSystem: 'Windows 10, Windows 11 (64-bit)',
   applicationCategory: 'DeveloperApplication',
   offers: {
@@ -97,9 +135,18 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
   '/': {
     title: 'Meoow AI | Real-Time AI Interview Copilot & Preparation Assistant',
     metaDescription:
-      'Prepare and excel in technical software engineering interviews with real-time voice transcription, instant screen OCR capture, and sub-second Groq AI hints. Start free with 30 credits.',
+      'Meoow (Meoow AI) is the real-time AI interview copilot and preparation assistant for software engineers. Get live speech transcription, instant screen OCR capture, and sub-second Groq AI hints. Start free with 30 credits at meooow.tech.',
     canonicalUrl: `${CANONICAL_DOMAIN}/`,
     keywords: [
+      'Meoow',
+      'Meoow AI',
+      'Meooow',
+      'Meoow Tech',
+      'Meooow Tech',
+      'Meow',
+      'Meow AI',
+      'Meooow AI',
+      'Meooow.tech',
       'AI interview help',
       'AI interview assistant',
       'AI interview preparation',
@@ -110,7 +157,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
     ],
     ogTitle: 'Meoow AI | Real-Time AI Interview Copilot & Preparation Assistant',
     ogDescription:
-      'Excel in technical software interviews with sub-second AI hints, voice transcription, and instant screen OCR. Start free with 30 bonus credits.',
+      'Meoow (Meoow AI) is the real-time AI interview copilot and preparation assistant for software engineers. Excel in technical software interviews with sub-second AI hints, voice transcription, and instant screen OCR. Start free with 30 bonus credits.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
     structuredData: [

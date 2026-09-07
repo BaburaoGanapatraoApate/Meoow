@@ -42,7 +42,7 @@ export const HomePage: React.FC = () => {
             <div className="flex justify-center">
               <Badge variant="purple" size="md">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>AI Interview Copilot</span>
+                <span>Meoow AI — Real-Time Interview Copilot</span>
               </Badge>
             </div>
 
