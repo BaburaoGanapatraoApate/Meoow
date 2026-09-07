@@ -9,6 +9,7 @@ import {
   PaymentServiceError,
 } from "../services/paymentService";
 import { getActivePackages } from "../services/packageService";
+import { pool } from "../db/database";
 
 const router = Router();
 
@@ -37,9 +38,12 @@ function formatZodErrors(error: z.ZodError): string {
  * 1. GET /api/payments/packages
  * Retrieve available active credit packages for purchase.
  */
-router.get("/packages", authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+router.get("/packages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const packages = await getActivePackages();
+    const userId = req.userId!;
+    const userRes = await pool.query("SELECT role FROM users WHERE id = $1", [userId]);
+    const isAdmin = userRes.rows[0]?.role === "admin";
+    const packages = await getActivePackages(isAdmin);
     res.status(200).json({
       packages: packages.map((p) => ({
         id: p.code,
@@ -47,6 +51,7 @@ router.get("/packages", authMiddleware, async (_req: AuthenticatedRequest, res: 
         credits: p.credits,
         amountPaise: p.amountPaise,
         currency: p.currency,
+        isTest: p.isTest || false,
       })),
     });
   } catch (err: any) {

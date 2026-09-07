@@ -46,6 +46,17 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: path.resolve(__dirname, 'src/preload/paymentPreload.ts'),
+        vite: {
+          build: {
+            outDir: path.resolve(__dirname, 'dist/electron/preload'),
+            rollupOptions: {
+              external: ['electron'],
+            },
+          },
+        },
+      },
     ]),
   ],
   root: rendererRoot,
@@ -59,6 +70,7 @@ export default defineConfig({
       input: {
         index: path.resolve(rendererRoot, 'index.html'),
         capture: path.resolve(rendererRoot, 'capture.html'),
+        payment: path.resolve(rendererRoot, 'payment.html'),
       },
     },
   },

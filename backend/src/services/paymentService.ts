@@ -66,6 +66,13 @@ export async function createPaymentOrder(
     throw new PaymentServiceError("The requested credit package is no longer available.", 400, "INACTIVE_PACKAGE");
   }
 
+  if (pkg.isTest) {
+    const userRes = await pool.query("SELECT role FROM users WHERE id = $1", [userId]);
+    if (userRes.rows[0]?.role !== "admin") {
+      throw new PaymentServiceError("Test packages are restricted to authorized admin accounts.", 403, "PACKAGE_RESTRICTED");
+    }
+  }
+
   const amountPaise = pkg.amountPaise;
   const currency = pkg.currency || "INR";
   const receipt = `rcpt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

@@ -4,6 +4,7 @@ export interface ClientCreditPackage {
   credits: number;
   amountPaise: number;
   currency: string;
+  isTest?: boolean;
 }
 
 export interface PaymentOrderResponse {

@@ -8,22 +8,29 @@ export interface CreditPackage {
   amountPaise: number;
   currency: string;
   active: boolean;
+  isTest?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 /**
  * Retrieve all currently active credit packages from the database.
+ * If includeTest is false, returns only non-test public packages.
  */
-export async function getActivePackages(): Promise<CreditPackage[]> {
-  const result = await pool.query(
-    `SELECT id, code, name, credits, amount_paise as "amountPaise",
-            currency, active, created_at as "createdAt", updated_at as "updatedAt"
-     FROM credit_packages
-     WHERE active = TRUE
-     ORDER BY amount_paise ASC`
-  );
+export async function getActivePackages(includeTest = false): Promise<CreditPackage[]> {
+  const query = includeTest
+    ? `SELECT id, code, name, credits, amount_paise as "amountPaise",
+              currency, active, is_test as "isTest", created_at as "createdAt", updated_at as "updatedAt"
+       FROM credit_packages
+       WHERE active = TRUE
+       ORDER BY amount_paise ASC`
+    : `SELECT id, code, name, credits, amount_paise as "amountPaise",
+              currency, active, is_test as "isTest", created_at as "createdAt", updated_at as "updatedAt"
+       FROM credit_packages
+       WHERE active = TRUE AND is_test = FALSE
+       ORDER BY amount_paise ASC`;
 
+  const result = await pool.query(query);
   return result.rows;
 }
 
@@ -33,7 +40,7 @@ export async function getActivePackages(): Promise<CreditPackage[]> {
 export async function getPackageByCode(code: string): Promise<CreditPackage | null> {
   const result = await pool.query(
     `SELECT id, code, name, credits, amount_paise as "amountPaise",
-            currency, active, created_at as "createdAt", updated_at as "updatedAt"
+            currency, active, is_test as "isTest", created_at as "createdAt", updated_at as "updatedAt"
      FROM credit_packages
      WHERE code = $1`,
     [code]

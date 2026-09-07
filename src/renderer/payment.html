@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meoow Secure Payment</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; connect-src 'self' https://api.meooow.tech wss://api.meooow.tech https://api.razorpay.com https://checkout.razorpay.com https://lumberjack.razorpay.com http: https: ws: wss: blob:; img-src 'self' blob: data: https://*.razorpay.com; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com; style-src 'self' 'unsafe-inline';">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    }
+    .logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #0284c71a;
+      border: 1px solid #0284c740;
+      color: #38bdf8;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .order-box {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+    .order-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .order-row:last-child {
+      margin-bottom: 0;
+      padding-top: 8px;
+      border-top: 1px solid #1e293b;
+    }
+    .order-value {
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .order-amount {
+      font-size: 18px;
+      font-weight: 800;
+      color: #38bdf8;
+    }
+    .spinner {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(56, 189, 248, 0.2);
+      border-radius: 50%;
+      border-top-color: #38bdf8;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .status-text {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 20px;
+    }
+    .btn-cancel {
+      background: transparent;
+      border: 1px solid #475569;
+      color: #94a3b8;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+    .btn-cancel:hover {
+      background: #334155;
+      color: #f8fafc;
+      border-color: #64748b;
+    }
+    .error-banner {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .security-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 18px;
+      font-size: 11px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo-badge">
+      ⚡ Meoow Secure Checkout
+    </div>
+    <h1 id="title">Initializing Gateway</h1>
+    <p class="subtitle" id="subtitle">Connecting securely to Razorpay...</p>
+
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="order-box" id="orderBox" style="display: none;">
+      <div class="order-row">
+        <span>Package</span>
+        <span class="order-value" id="orderPackage">—</span>
+      </div>
+      <div class="order-row">
+        <span>Order ID</span>
+        <span class="order-value" id="orderId" style="font-family: monospace; font-size: 11px;">—</span>
+      </div>
+      <div class="order-row">
+        <span>Amount Payable</span>
+        <span class="order-amount" id="orderAmount">—</span>
+      </div>
+    </div>
+
+    <div id="loaderArea">
+      <div class="spinner"></div>
+      <div class="status-text" id="statusText">Opening payment gateway...</div>
+    </div>
+
+    <button type="button" class="btn-cancel" id="cancelBtn">Cancel & Close</button>
+
+    <div class="security-badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+      <span>256-bit SSL Encrypted • Powered by Razorpay</span>
+    </div>
+  </div>
+
+  <script>
+    const cancelBtn = document.getElementById('cancelBtn');
+    const statusText = document.getElementById('statusText');
+    const errorBanner = document.getElementById('errorBanner');
+    const orderBox = document.getElementById('orderBox');
+    const orderPackage = document.getElementById('orderPackage');
+    const orderId = document.getElementById('orderId');
+    const orderAmount = document.getElementById('orderAmount');
+    const title = document.getElementById('title');
+    const subtitle = document.getElementById('subtitle');
+    const loaderArea = document.getElementById('loaderArea');
+
+    cancelBtn.addEventListener('click', () => {
+      if (window.paymentAPI) {
+        window.paymentAPI.notifyDismissed();
+      } else {
+        window.close();
+      }
+    });
+
+    function showError(msg) {
+      loaderArea.style.display = 'none';
+      errorBanner.style.display = 'block';
+      errorBanner.textContent = msg;
+      title.textContent = 'Payment Incomplete';
+      subtitle.textContent = 'You can retry or close this window.';
+    }
+
+    if (window.paymentAPI) {
+      window.paymentAPI.onInit((options) => {
+        try {
+          if (options) {
+            orderBox.style.display = 'block';
+            orderPackage.textContent = options.description || 'AI Credits';
+            orderId.textContent = options.order_id || '—';
+            orderAmount.textContent = '₹' + ((options.amount || 0) / 100);
+            title.textContent = 'Complete Payment';
+            subtitle.textContent = 'Follow the Razorpay prompt to finish payment';
+          }
+
+          if (typeof window.Razorpay === 'undefined') {
+            showError('Payment gateway script failed to load. Please check your internet connection.');
+            return;
+          }
+
+          const rzpOptions = Object.assign({}, options, {
+            handler: function (response) {
+              loaderArea.style.display = 'block';
+              statusText.textContent = 'Payment successful! Finalizing...';
+              window.paymentAPI.notifySuccess(response);
+            },
+            modal: {
+              ondismiss: function () {
+                window.paymentAPI.notifyDismissed();
+              },
+              escape: true,
+              backdropclose: false
+            }
+          });
+
+          const rzp = new window.Razorpay(rzpOptions);
+
+          rzp.on('payment.failed', function (resp) {
+            const errorDesc = (resp && resp.error && resp.error.description) || 'Payment was declined or failed.';
+            showError(errorDesc);
+            window.paymentAPI.notifyFailed(errorDesc);
+          });
+
+          rzp.open();
+        } catch (err) {
+          showError(err.message || 'Error opening Razorpay modal.');
+          window.paymentAPI.notifyFailed(err.message || 'Error opening Razorpay modal');
+        }
+      });
+    } else {
+      showError('Payment bridge not initialized.');
+    }
+  </script>
+</body>
+</html>

@@ -83,13 +83,6 @@ export function PurchaseCreditsModal({ isOpen, onClose }: PurchaseCreditsModalPr
       // 1. Create Razorpay order on backend
       const orderData = await paymentApi.createOrder(token, selectedPackageId);
 
-      // 2. Load Razorpay script
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded) {
-        throw new Error('Could not load payment gateway. Please check your internet connection.');
-      }
-
-      // 3. Open Razorpay Checkout modal
       const options = {
         key: orderData.keyId,
         amount: orderData.amount,
@@ -104,20 +97,19 @@ export function PurchaseCreditsModal({ isOpen, onClose }: PurchaseCreditsModalPr
         theme: {
           color: '#0284c7',
         },
-        handler: async (response: {
-          razorpay_payment_id: string;
-          razorpay_order_id: string;
-          razorpay_signature: string;
-        }) => {
+      };
+
+      // 2. Open checkout in dedicated non-transparent payment window
+      if (window.meow?.openRazorpayCheckout) {
+        const result = await window.meow.openRazorpayCheckout(options);
+        if (result.success && result.data) {
           try {
-            // 4. Send payment signatures to backend for verification & fulfillment
             const verifyRes = await paymentApi.verifyPayment(token, {
-              orderId: response.razorpay_order_id,
-              paymentId: response.razorpay_payment_id,
-              signature: response.razorpay_signature,
+              orderId: result.data.razorpay_order_id,
+              paymentId: result.data.razorpay_payment_id,
+              signature: result.data.razorpay_signature,
             });
 
-            // 5. Authoritatively refresh user credits
             await refreshUser();
 
             setPurchaseSuccess({
@@ -133,21 +125,64 @@ export function PurchaseCreditsModal({ isOpen, onClose }: PurchaseCreditsModalPr
           } finally {
             setIsProcessing(false);
           }
-        },
-        modal: {
-          ondismiss: () => {
-            setIsProcessing(false);
+        } else if (result.error) {
+          setErrorMessage(result.error);
+          setIsProcessing(false);
+        } else {
+          // User closed / dismissed payment window
+          setIsProcessing(false);
+        }
+      } else {
+        // Fallback for browser preview
+        const scriptLoaded = await loadRazorpayScript();
+        if (!scriptLoaded) {
+          throw new Error('Could not load payment gateway. Please check your internet connection.');
+        }
+
+        const fallbackOptions = {
+          ...options,
+          handler: async (response: {
+            razorpay_payment_id: string;
+            razorpay_order_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              const verifyRes = await paymentApi.verifyPayment(token, {
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              });
+
+              await refreshUser();
+
+              setPurchaseSuccess({
+                creditsAwarded: verifyRes.creditsAwarded || orderData.credits,
+                newBalance: verifyRes.newBalance ?? ((user?.credits ?? 0) + orderData.credits),
+              });
+              toast.success(`Successfully added ${orderData.credits} credits to your account!`);
+            } catch (verifyErr: any) {
+              console.error('[PurchaseModal] Payment verification failed:', verifyErr);
+              setErrorMessage(
+                verifyErr.message || 'Payment verification failed. Please contact support if your account was debited.'
+              );
+            } finally {
+              setIsProcessing(false);
+            }
           },
-        },
-      };
+          modal: {
+            ondismiss: () => {
+              setIsProcessing(false);
+            },
+          },
+        };
 
-      const razorpayInstance = new (window as any).Razorpay(options);
-      razorpayInstance.on('payment.failed', (response: any) => {
-        setIsProcessing(false);
-        setErrorMessage(response.error?.description || 'Payment failed or was declined.');
-      });
-
-      razorpayInstance.open();
+        const razorpayInstance = new (window as any).Razorpay(fallbackOptions);
+        razorpayInstance.on('payment.failed', (response: any) => {
+          setIsProcessing(false);
+          setErrorMessage(response.error?.description || 'Payment failed or was declined.');
+        });
+        razorpayInstance.open();
+      }
     } catch (err: any) {
       console.error('[PurchaseModal] Order creation failed:', err);
       setIsProcessing(false);
@@ -251,7 +286,9 @@ export function PurchaseCreditsModal({ isOpen, onClose }: PurchaseCreditsModalPr
                       >
                         <div className="package-card-header">
                           <div className="package-credits">{pkg.credits} Credits</div>
-                          <div className="package-badge">Instant Delivery</div>
+                          <div className={`package-badge ${pkg.isTest ? 'test-badge' : ''}`}>
+                            {pkg.isTest ? 'Test Mode' : 'Instant Delivery'}
+                          </div>
                         </div>
                         <div className="package-price">₹{pkg.amountPaise / 100}</div>
                         <div className="package-subtext">

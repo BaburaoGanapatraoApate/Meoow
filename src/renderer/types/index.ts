@@ -245,6 +245,7 @@ export interface MeowAPI {
   getAuthToken(): Promise<string | null>;
   setAuthToken(token: string): Promise<boolean>;
   clearAuthToken(): Promise<boolean>;
+  openRazorpayCheckout(options: any): Promise<{ success: boolean; data?: any; error?: string; dismissed?: boolean }>;
 
   // Send
   quitApp(): void;

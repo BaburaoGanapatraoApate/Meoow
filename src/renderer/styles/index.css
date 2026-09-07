@@ -421,6 +421,11 @@
   border-radius: 9999px !important;
 }
 
+.package-badge.test-badge {
+  color: #fbbf24 !important;
+  background: rgba(251, 191, 36, 0.15) !important;
+}
+
 .package-price {
   font-size: 1.35rem !important;
   font-weight: 800 !important;

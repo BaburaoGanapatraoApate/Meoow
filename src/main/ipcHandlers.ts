@@ -1,7 +1,13 @@
 import { ipcMain, app, shell, desktopCapturer, dialog, BrowserWindow, screen, systemPreferences } from "electron";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import { isContentProtectionFullySupported, applyPrivateMode } from "./windowProtection";
 import { parseResume } from "./resumeParser";
 import { getAuthToken, setAuthToken, clearAuthToken } from "./tokenStorage";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 const toFiniteInteger = (value: any) =>
@@ -301,5 +307,147 @@ export function registerIpcHandlers(
 
   ipcMain.handle("auth:clear-token", () => {
     return clearAuthToken();
+  });
+
+  // Secure Razorpay Payment Checkout Window
+  let activePaymentWin: BrowserWindow | null = null;
+
+  function getPaymentIconPath() {
+    const isProd = app.isPackaged;
+    const filename = process.platform === "darwin" ? "logo.icns" : process.platform === "win32" ? "logo.ico" : "logo.png";
+    if (isProd && process.resourcesPath) {
+      const candidates = [
+        path.join(process.resourcesPath, filename),
+        path.join(process.resourcesPath, "icon.ico"),
+        path.join(process.resourcesPath, "logo.ico"),
+        path.join(process.resourcesPath, "icon.png"),
+      ];
+      for (const c of candidates) {
+        try {
+          if (fs.existsSync(c)) return c;
+        } catch {}
+      }
+    }
+    const devCandidates = [
+      path.join(app.getAppPath(), "resources", filename),
+      path.join(app.getAppPath(), "resources", "icon.ico"),
+      path.join(app.getAppPath(), "src", "assets", filename),
+    ];
+    for (const c of devCandidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch {}
+    }
+    return undefined;
+  }
+
+  ipcMain.handle("payment:open-checkout", async (_event, options: any) => {
+    return new Promise((resolve) => {
+      try {
+        if (activePaymentWin && !activePaymentWin.isDestroyed()) {
+          activePaymentWin.focus();
+          return;
+        }
+
+        const preloadPath = path.join(__dirname, "..", "preload", "paymentPreload.js");
+
+        activePaymentWin = new BrowserWindow({
+          width: 480,
+          height: 720,
+          minWidth: 400,
+          minHeight: 600,
+          show: false,
+          transparent: false,
+          backgroundColor: "#0f172a",
+          alwaysOnTop: true,
+          frame: true,
+          title: "Meoow - Secure Razorpay Checkout",
+          autoHideMenuBar: true,
+          center: true,
+          icon: getPaymentIconPath(),
+          webPreferences: {
+            preload: preloadPath,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false,
+          },
+        });
+
+        let isResolved = false;
+        const cleanup = () => {
+          ipcMain.removeListener("payment:success", onPaymentSuccess);
+          ipcMain.removeListener("payment:failed", onPaymentFailed);
+          ipcMain.removeListener("payment:dismissed", onPaymentDismissed);
+          if (activePaymentWin && !activePaymentWin.isDestroyed()) {
+            activePaymentWin.destroy();
+          }
+          activePaymentWin = null;
+        };
+
+        const onPaymentSuccess = (_e: any, response: any) => {
+          if (!isResolved) {
+            isResolved = true;
+            cleanup();
+            resolve({ success: true, data: response });
+          }
+        };
+
+        const onPaymentFailed = (_e: any, errorMsg: string) => {
+          if (!isResolved) {
+            isResolved = true;
+            cleanup();
+            resolve({ success: false, error: errorMsg });
+          }
+        };
+
+        const onPaymentDismissed = () => {
+          if (!isResolved) {
+            isResolved = true;
+            cleanup();
+            resolve({ success: false, dismissed: true });
+          }
+        };
+
+        ipcMain.on("payment:success", onPaymentSuccess);
+        ipcMain.on("payment:failed", onPaymentFailed);
+        ipcMain.on("payment:dismissed", onPaymentDismissed);
+
+        activePaymentWin.on("closed", () => {
+          if (!isResolved) {
+            isResolved = true;
+            cleanup();
+            resolve({ success: false, dismissed: true });
+          }
+        });
+
+        activePaymentWin.webContents.once("did-finish-load", () => {
+          if (activePaymentWin && !activePaymentWin.isDestroyed()) {
+            activePaymentWin.webContents.send("payment:init", options);
+          }
+        });
+
+        activePaymentWin.once("ready-to-show", () => {
+          if (activePaymentWin && !activePaymentWin.isDestroyed()) {
+            activePaymentWin.show();
+            activePaymentWin.focus();
+          }
+        });
+
+        if (process.env.VITE_DEV_SERVER_URL) {
+          activePaymentWin.loadURL(`${process.env.VITE_DEV_SERVER_URL}payment.html`);
+        } else {
+          const candidates = [
+            path.join(__dirname, "..", "..", "..", "dist", "payment.html"),
+            path.join(app.getAppPath(), "dist", "payment.html"),
+            path.join(__dirname, "..", "..", "dist", "payment.html"),
+          ];
+          const target = candidates.find((c) => fs.existsSync(c)) || candidates[0];
+          activePaymentWin.loadFile(target);
+        }
+      } catch (err: any) {
+        console.error("[Meoow] Failed to open payment window:", err);
+        resolve({ success: false, error: err.message || "Failed to open payment gateway window" });
+      }
+    });
   });
 }

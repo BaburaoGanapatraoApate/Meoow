@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('meow', {
   getAuthToken: () => ipcRenderer.invoke('auth:get-token'),
   setAuthToken: (token: string) => ipcRenderer.invoke('auth:set-token', token),
   clearAuthToken: () => ipcRenderer.invoke('auth:clear-token'),
+  openRazorpayCheckout: (options: any) => ipcRenderer.invoke('payment:open-checkout', options),
 
   // Send (one-way) APIs
   quitApp: () => ipcRenderer.send('app:end'),
