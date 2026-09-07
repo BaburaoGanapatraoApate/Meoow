@@ -42,12 +42,20 @@ export class GroqClient {
         throw new Error('Authentication required. Please log in.');
       }
 
+      const deviceIdentity = await window.meow?.getDeviceIdentity?.();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+
+      if (deviceIdentity?.deviceId && deviceIdentity?.deviceToken) {
+        headers['X-Device-Id'] = deviceIdentity.deviceId;
+        headers['X-Device-Token'] = deviceIdentity.deviceToken;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/ai/groq/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify({
           requestId,
           source,

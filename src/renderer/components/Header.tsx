@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { CopilotConnectionState } from '../types';
 import { LANGUAGES } from '../utils/languages';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from './Toast';
 import { PurchaseCreditsModal } from './PurchaseCreditsModal';
 import { AdminDashboardModal } from './admin/AdminDashboardModal';
 import logoImg from '../assets/logo.png';
@@ -26,6 +27,10 @@ interface HeaderProps {
   onAnalyzeScreen: () => void;
   isMicEnabled: boolean;
   onToggleMic: () => void;
+  isPurchaseModalOpen?: boolean;
+  onOpenPurchaseModal?: () => void;
+  onClosePurchaseModal?: () => void;
+  zeroCreditCountdown?: number | null;
 }
 
 export default function Header({
@@ -48,8 +53,13 @@ export default function Header({
   onAnalyzeScreen,
   isMicEnabled,
   onToggleMic,
+  isPurchaseModalOpen: propIsPurchaseModalOpen,
+  onOpenPurchaseModal,
+  onClosePurchaseModal,
+  zeroCreditCountdown,
 }: HeaderProps) {
   const { user, logout } = useAuth();
+  const toast = useToast();
 
   // Screen permission
   const [hasScreenPermission, setHasScreenPermission] = useState<boolean | null>(null);
@@ -70,7 +80,20 @@ export default function Header({
     return stored ? parseFloat(stored) : 1;
   });
   const [sessionDuration, setSessionDuration] = useState(0);
-  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
+  const [localPurchaseModalOpen, setLocalPurchaseModalOpen] = useState(false);
+  const isPurchaseModalControlled = typeof propIsPurchaseModalOpen === 'boolean';
+  const isPurchaseModalOpen = isPurchaseModalControlled ? propIsPurchaseModalOpen : localPurchaseModalOpen;
+  const setIsPurchaseModalOpen = (open: boolean) => {
+    if (open) {
+      if (onOpenPurchaseModal) onOpenPurchaseModal();
+      else setLocalPurchaseModalOpen(true);
+    } else {
+      if (onClosePurchaseModal) onClosePurchaseModal();
+      else setLocalPurchaseModalOpen(false);
+    }
+  };
+
+  const hasZeroCredits = (user?.credits ?? 0) <= 0 && user?.usageMode !== 'unlimited';
   const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -319,17 +342,31 @@ export default function Header({
         <div className="header-right">
           {/* Credits Badge & Purchase Trigger */}
           {user && (
-            <button
-              type="button"
-              className="user-credits-badge"
-              title="Click to buy more AI credits"
-              onClick={() => setIsPurchaseModalOpen(true)}
-              data-window-interactive="true"
-            >
-              <span className="user-credits-icon">⚡</span>
-              <span>{user.credits} credits</span>
-              <span className="user-buy-credits-btn">+ Buy</span>
-            </button>
+            zeroCreditCountdown !== null && zeroCreditCountdown !== undefined ? (
+              <button
+                type="button"
+                className="user-credits-badge zero-credit-warning-badge"
+                title={`0 credits remaining. Session ending in ${zeroCreditCountdown}s. Click to buy credits.`}
+                onClick={() => setIsPurchaseModalOpen(true)}
+                data-window-interactive="true"
+              >
+                <span className="user-credits-icon">⚠️</span>
+                <span>Ending in {zeroCreditCountdown}s</span>
+                <span className="user-buy-credits-btn">+ Buy</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="user-credits-badge"
+                title="Click to buy more AI credits"
+                onClick={() => setIsPurchaseModalOpen(true)}
+                data-window-interactive="true"
+              >
+                <span className="user-credits-icon">⚡</span>
+                <span>{user.credits} credits</span>
+                <span className="user-buy-credits-btn">+ Buy</span>
+              </button>
+            )
           )}
           {renderConnectionStatus()}
           {renderDurationIndicator()}
@@ -359,11 +396,11 @@ export default function Header({
                 data-window-interactive="true"
               >
                 {isMicEnabled ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 19v3" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><rect x="9" y="2" width="6" height="13" rx="3" />
                   </svg>
                 ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 19v3" /><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" /><path d="M16.95 16.95A7 7 0 0 1 5 12v-2" /><path d="M18.89 13.23A7 7 0 0 0 19 12v-2" /><path d="m2 2 20 20" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
                   </svg>
                 )}
@@ -375,7 +412,7 @@ export default function Header({
                 title="Analyze Screen (Ctrl+Shift+A)"
                 data-window-interactive="true"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z" />
                   <path d="M20.054 15.987H3.946" />
                 </svg>
@@ -388,7 +425,7 @@ export default function Header({
                 title="End Interview Session"
                 data-window-interactive="true"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <rect width="18" height="18" x="3" y="3" rx="2" />
                 </svg>
                 End
@@ -405,6 +442,15 @@ export default function Header({
                     type="submit"
                     form="session-setup-form"
                     onClick={(e) => {
+                      if (hasZeroCredits) {
+                        e.preventDefault();
+                        toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+                          label: 'Buy Credits',
+                          onClick: () => setIsPurchaseModalOpen(true),
+                        });
+                        setIsPurchaseModalOpen(true);
+                        return;
+                      }
                       const form = document.getElementById('session-setup-form') as HTMLFormElement | null;
                       if (form) {
                         e.preventDefault();
@@ -413,10 +459,10 @@ export default function Header({
                     }}
                     className="start-session-button"
                     disabled={isStartingSession}
-                    title="Start Live Interview Session"
+                    title={hasZeroCredits ? 'You have 0 credits so buy it' : 'Start Live Interview Session'}
                     data-window-interactive="true"
                   >
-                    {isStartingSession ? 'Starting...' : 'Start Session'}
+                    {isStartingSession ? 'Starting...' : hasZeroCredits ? 'Buy Credits (0 left)' : 'Start Session'}
                   </button>
                   <button
                     type="button"
@@ -431,9 +477,19 @@ export default function Header({
               ) : (
                 <button
                   type="button"
-                  onClick={onStartInterview || onStart}
+                  onClick={() => {
+                    if (hasZeroCredits) {
+                      toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+                        label: 'Buy Credits',
+                        onClick: () => setIsPurchaseModalOpen(true),
+                      });
+                      setIsPurchaseModalOpen(true);
+                      return;
+                    }
+                    (onStartInterview || onStart)?.();
+                  }}
                   className="start-button"
-                  title="Configure and start interview"
+                  title={hasZeroCredits ? 'You have 0 credits so buy it' : 'Configure and start interview'}
                   data-window-interactive="true"
                 >
                   Start Interview

@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { z } from "zod";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
+import { deviceAuthMiddleware } from "../middleware/deviceAuth";
 import {
   reserveCredit,
   refundCredit,
@@ -14,8 +15,9 @@ import { resolveGroqCredential } from "../services/providerCredentialService";
 
 const router = Router();
 
-// All AI endpoints require authentication
+// All AI endpoints require authentication and valid device authorization
 router.use(authMiddleware);
+router.use(deviceAuthMiddleware);
 
 // In-memory concurrency guard per user (instance-local)
 const activeUserStreams = new Map<string, number>();

@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { isContentProtectionFullySupported, applyPrivateMode } from "./windowProtection";
 import { parseResume } from "./resumeParser";
 import { getAuthToken, setAuthToken, clearAuthToken } from "./tokenStorage";
+import { getOrCreateDeviceIdentity } from "./deviceIdentity";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,9 +119,18 @@ export function registerIpcHandlers(
 
   ipcMain.on("open-external", (_e, url) => {
     if (!url || typeof url !== "string") return;
-    shell.openExternal(url, { activate: true }).catch((err) => {
-      console.error("openExternal failed:", err);
-    });
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        console.warn("[Security] Blocked non-http(s) open-external URL:", url);
+        return;
+      }
+      shell.openExternal(url, { activate: true }).catch((err) => {
+        console.error("openExternal failed:", err);
+      });
+    } catch {
+      console.warn("[Security] Invalid URL passed to open-external:", url);
+    }
   });
 
   // Privacy
@@ -258,7 +268,18 @@ export function registerIpcHandlers(
 
   // Resume
   ipcMain.handle("resume:parse-local", async (_event, filePath) => {
-    return await parseResume(filePath);
+    if (!filePath || typeof filePath !== "string") {
+      throw new Error("Invalid file path: Must be a non-empty string");
+    }
+    const resolvedPath = path.resolve(filePath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error("Resume file does not exist");
+    }
+    const ext = path.extname(resolvedPath).toLowerCase();
+    if (![".pdf", ".docx", ".txt"].includes(ext)) {
+      throw new Error("Invalid file type. Only .pdf, .docx, and .txt files are allowed.");
+    }
+    return await parseResume(resolvedPath);
   });
 
   ipcMain.handle("resume:pick-file", async () => {
@@ -307,6 +328,11 @@ export function registerIpcHandlers(
 
   ipcMain.handle("auth:clear-token", () => {
     return clearAuthToken();
+  });
+
+  // Device Identity & Licensing
+  ipcMain.handle("device:get-identity", async () => {
+    return await getOrCreateDeviceIdentity();
   });
 
   // Secure Razorpay Payment Checkout Window

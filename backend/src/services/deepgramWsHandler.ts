@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 import { z } from "zod";
 import { DeepgramLiveSession, DeepgramLiveConfig } from "./deepgramService";
 import { resolveDeepgramCredential } from "./providerCredentialService";
+import { verifyDevice } from "./deviceService";
+import { pool } from "../db/database";
 
 dotenv.config();
 
@@ -36,7 +38,9 @@ function checkConnectionRateLimit(ip: string): boolean {
 const authHandshakeSchema = z.object({
   type: z.literal("auth"),
   token: z.string().min(10, "Token too short").max(2048, "Token too long"),
-  language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/, "Invalid language code format").optional().default("en")
+  language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/, "Invalid language code format").optional().default("en"),
+  deviceId: z.string().max(255).optional(),
+  deviceToken: z.string().max(255).optional(),
 });
 
 export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketServer {
@@ -183,7 +187,7 @@ export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketS
             return;
           }
 
-          const { token, language } = parseResult.data;
+          const { token, language, deviceId, deviceToken } = parseResult.data;
           const secret = process.env.JWT_SECRET;
 
           if (!secret) {
@@ -214,6 +218,37 @@ export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketS
             }
 
             const authenticatedUserId = payload.sub;
+
+            // Strict device verification for desktop AI transcription
+            if (!deviceId || !deviceToken) {
+              const userRes = await pool.query("SELECT role FROM users WHERE id = $1", [authenticatedUserId]);
+              if (userRes.rows[0]?.role !== "admin") {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "error",
+                    code: "DEVICE_REQUIRED",
+                    message: "Valid device identification (deviceId and deviceToken) is required for transcription.",
+                  })
+                );
+                clientWs.close(4403, "Device authorization required");
+                cleanup();
+                return;
+              }
+            } else {
+              const deviceCheck = await verifyDevice(authenticatedUserId, deviceId, deviceToken);
+              if (!deviceCheck.valid) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "error",
+                    code: deviceCheck.code || "DEVICE_UNAUTHORIZED",
+                    message: deviceCheck.message || "Device authorization failed.",
+                  })
+                );
+                clientWs.close(4403, "Device unauthorized");
+                cleanup();
+                return;
+              }
+            }
 
             // Check per-user session concurrency
             const userActiveSessions = activeUserWsSessions.get(authenticatedUserId) || 0;

@@ -10,6 +10,7 @@ import creditsRouter from "./routes/credits";
 import aiRouter from "./routes/ai";
 import paymentsRouter from "./routes/payments";
 import adminRouter from "./routes/admin";
+import devicesRouter from "./routes/devices";
 import { apiLimiter } from "./middleware/rateLimiter";
 import { setupDeepgramWebSocketServer } from "./services/deepgramWsHandler";
 
@@ -86,7 +87,14 @@ app.use(
       return callback(corsErr, false);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Device-Id",
+      "X-Device-Token",
+      "x-device-id",
+      "x-device-token",
+    ],
     credentials: false,
   })
 );
@@ -119,6 +127,7 @@ app.use("/api/credits", creditsRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/devices", devicesRouter);
 
 // 8. 404 Catch-All Handler for Unmatched Routes
 app.use((_req: Request, res: Response) => {

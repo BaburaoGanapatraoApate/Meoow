@@ -6,6 +6,7 @@ import { TranscriptPanel } from './components/TranscriptPanel';
 import { ToastProvider, useToast } from './components/Toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { DeviceLimitModal } from './components/DeviceLimitModal';
 import { GroqClient } from './services/groqClient';
 import { createDeepgramManager, type DeepgramMessageEvent } from './services/deepgramClient';
 import {
@@ -45,7 +46,17 @@ const FINALIZE_DRAIN = 100;
 // ── Inner app component (uses toast context) ──
 function MeowApp() {
   const toast = useToast();
-  const { isAuthenticated, isLoading, refreshUser } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading,
+    refreshUser,
+    user,
+    deviceLimitExceeded,
+    activeDevices,
+    maxDevices,
+    syncDevice,
+    logout,
+  } = useAuth();
 
   // ── State ──
   const [isSessionStarted, setIsSessionStarted] = useState(false);
@@ -58,6 +69,10 @@ function MeowApp() {
   const [resumeText, setResumeText] = useState('');
   const [isShowingSetup, setIsShowingSetup] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
+  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
+  const hasZeroCredits = (user?.credits ?? 0) <= 0 && user?.usageMode !== 'unlimited';
+  const [zeroCreditCountdown, setZeroCreditCountdown] = useState<number | null>(null);
+  const zeroCreditCountdownRef = useRef<number | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState('en');
   const [autoAnswer, setAutoAnswer] = useState(true);
   const [isEndingActiveSession, setIsEndingActiveSession] = useState(false);
@@ -95,6 +110,7 @@ function MeowApp() {
   // ── Sync refs ──
   useEffect(() => { autoAnswerRef.current = autoAnswer; }, [autoAnswer]);
   useEffect(() => { groqClientRef.current = groqClient; }, [groqClient]);
+  useEffect(() => { zeroCreditCountdownRef.current = zeroCreditCountdown; }, [zeroCreditCountdown]);
 
   // ── Click-through setup (only active during live session) ──
   useEffect(() => setupClickThrough(isSessionStarted), [isSessionStarted]);
@@ -133,6 +149,10 @@ function MeowApp() {
     text: string,
     isFinal: boolean,
   ) => {
+    // Drop user voice immediately when credits are 0 during session
+    if (speaker === 'user' && zeroCreditCountdownRef.current !== null) {
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -472,6 +492,20 @@ function MeowApp() {
 
   // ── Start session ──
   const handleStartSession = async (formData: SessionFormData & { resume_text?: string }) => {
+    if (deviceLimitExceeded) {
+      toast.error('Device limit reached', 'Please authorize this device by replacing an inactive one.');
+      return;
+    }
+
+    if (hasZeroCredits) {
+      toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+        label: 'Buy Credits',
+        onClick: () => setIsPurchaseModalOpen(true),
+      });
+      setIsPurchaseModalOpen(true);
+      return;
+    }
+
     setIsStartingSession(true);
     hasReceivedAudioRef.current = false;
     streamingAnswerRef.current = '';
@@ -542,6 +576,9 @@ function MeowApp() {
           },
           onError: (err) => {
             setPendingCopilotWork(n => Math.max(0, n - 1));
+            if (err.code === 'INSUFFICIENT_CREDITS') {
+              refreshUser?.().catch?.(() => {});
+            }
             toast.error(err.message || 'AI generation failed');
             setCurrentStreamingAnswer('');
             streamingAnswerRef.current = '';
@@ -609,6 +646,7 @@ function MeowApp() {
       setIsRecording(false);
       setIsDeepgramConnected(false);
       setIsSessionStarted(false);
+      setZeroCreditCountdown(null);
       setTranscript([]);
       transcriptRef.current = [];
       setAnswers([]);
@@ -696,8 +734,88 @@ function MeowApp() {
     }
   };
 
+  // ── In-Session 0-Credit Monitor & Immediate Voice Cutoff ──
+  useEffect(() => {
+    if (!isSessionStarted) {
+      if (zeroCreditCountdown !== null) setZeroCreditCountdown(null);
+      return;
+    }
+
+    if (hasZeroCredits) {
+      if (zeroCreditCountdown === null) {
+        // Start 60-second countdown
+        setZeroCreditCountdown(60);
+        // Cut off microphone immediately
+        setIsMicEnabled(false);
+        micStream?.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        toast.warning(
+          '0 Credits Remaining',
+          'Microphone disabled. Session will end in 1 minute unless credits are added.',
+          {
+            label: 'Buy Credits',
+            onClick: () => setIsPurchaseModalOpen(true),
+          }
+        );
+      }
+    } else {
+      if (zeroCreditCountdown !== null) {
+        // User added credits during countdown! Recover session
+        setZeroCreditCountdown(null);
+        setIsMicEnabled(true);
+        micStream?.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+        });
+        toast.success('Credits Added', 'Voice capture restored. You can continue your session.');
+      }
+    }
+  }, [isSessionStarted, hasZeroCredits, zeroCreditCountdown, micStream, toast]);
+
+  // ── In-Session 0-Credit 1-Minute Countdown & Auto-End ──
+  useEffect(() => {
+    if (!isSessionStarted || zeroCreditCountdown === null) return;
+
+    if (zeroCreditCountdown <= 0) {
+      endSession();
+      setZeroCreditCountdown(null);
+      toast.error(
+        'Session Ended',
+        'Session automatically ended because your account has 0 credits.',
+        {
+          label: 'Buy Credits',
+          onClick: () => setIsPurchaseModalOpen(true),
+        }
+      );
+      setIsPurchaseModalOpen(true);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setZeroCreditCountdown((prev) => (prev !== null && prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isSessionStarted, zeroCreditCountdown, endSession, toast]);
+
+  // ── Periodic Credit Balance Check During Session ──
+  useEffect(() => {
+    if (!isSessionStarted) return;
+    const interval = setInterval(() => {
+      refreshUser?.().catch?.(() => {});
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [isSessionStarted, refreshUser]);
+
   // ── Toggle mic ──
   const toggleMic = () => {
+    if (zeroCreditCountdown !== null) {
+      toast.warning('Microphone Disabled', 'You have 0 credits. Buy credits to resume voice capture.', {
+        label: 'Buy Credits',
+        onClick: () => setIsPurchaseModalOpen(true),
+      });
+      return;
+    }
     const next = !isMicEnabled;
     setIsMicEnabled(next);
     micStream?.getAudioTracks().forEach(t => { t.enabled = next; });
@@ -721,10 +839,30 @@ function MeowApp() {
   return (
     <div className="app-container">
       <Header
-        onStart={() => setIsShowingSetup(prev => !prev)}
+        onStart={() => {
+          if (hasZeroCredits) {
+            toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+              label: 'Buy Credits',
+              onClick: () => setIsPurchaseModalOpen(true),
+            });
+            setIsPurchaseModalOpen(true);
+            return;
+          }
+          setIsShowingSetup(prev => !prev);
+        }}
         isShowingSetup={isShowingSetup}
         isStartingSession={isStartingSession}
-        onStartInterview={() => setIsShowingSetup(true)}
+        onStartInterview={() => {
+          if (hasZeroCredits) {
+            toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+              label: 'Buy Credits',
+              onClick: () => setIsPurchaseModalOpen(true),
+            });
+            setIsPurchaseModalOpen(true);
+            return;
+          }
+          setIsShowingSetup(true);
+        }}
         onCancelSetup={() => setIsShowingSetup(false)}
         isSessionStarted={isSessionStarted}
         selectedLanguage={selectedLanguage}
@@ -740,6 +878,10 @@ function MeowApp() {
         onAnalyzeScreen={analyzeScreen}
         isMicEnabled={isMicEnabled}
         onToggleMic={toggleMic}
+        isPurchaseModalOpen={isPurchaseModalOpen}
+        onOpenPurchaseModal={() => setIsPurchaseModalOpen(true)}
+        onClosePurchaseModal={() => setIsPurchaseModalOpen(false)}
+        zeroCreditCountdown={zeroCreditCountdown}
       />
 
       {!isProtectionSupported && (
@@ -757,6 +899,8 @@ function MeowApp() {
           onSubmit={handleStartSession}
           onCancel={() => setIsShowingSetup(false)}
           isStarting={isStartingSession}
+          hasZeroCredits={hasZeroCredits}
+          onOpenBuyCredits={() => setIsPurchaseModalOpen(true)}
         />
       )}
 
@@ -781,6 +925,18 @@ function MeowApp() {
           />
         </div>
       )}
+
+      <DeviceLimitModal
+        isOpen={deviceLimitExceeded}
+        activeDevices={activeDevices}
+        maxDevices={maxDevices}
+        onDeviceReplaced={() => {
+          syncDevice();
+        }}
+        onLogout={() => {
+          logout();
+        }}
+      />
 
       {/* ToastViewport is rendered by ToastProvider */}
     </div>

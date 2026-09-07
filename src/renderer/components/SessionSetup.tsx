@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LANGUAGES } from '../utils/languages';
+import { useToast } from './Toast';
 
 const INTERVIEW_ROUNDS = [
   { value: 'general', label: 'General' },
@@ -44,6 +45,8 @@ interface SessionSetupProps {
   onSubmit: (config: SessionConfig) => void;
   onCancel: () => void;
   isStarting: boolean;
+  hasZeroCredits?: boolean;
+  onOpenBuyCredits?: () => void;
 }
 
 export const SessionSetup: React.FC<SessionSetupProps> = ({
@@ -54,7 +57,10 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
   onSubmit,
   onCancel,
   isStarting,
+  hasZeroCredits = false,
+  onOpenBuyCredits,
 }) => {
+  const toast = useToast();
   const [config, setConfig] = useState<SessionConfig>({
     job_title: '',
     company: '',
@@ -237,6 +243,16 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (hasZeroCredits) {
+      toast.error('You have 0 credits so buy it', 'Please purchase credits to start an interview session.', {
+        label: 'Buy Credits',
+        onClick: () => onOpenBuyCredits?.(),
+      });
+      onOpenBuyCredits?.();
+      return;
+    }
+
     const title = config.job_title.trim();
     if (!title) {
       setTitleError('Job title is required');
@@ -283,6 +299,46 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
           ✕
         </button>
       </div>
+
+      {hasZeroCredits && (
+        <div
+          style={{
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#991b1b',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+            <span>⚠️</span>
+            <span>You have 0 credits so buy it before starting a session.</span>
+          </div>
+          {onOpenBuyCredits && (
+            <button
+              type="button"
+              onClick={onOpenBuyCredits}
+              style={{
+                background: '#0284c7',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 14px',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              ⚡ Buy Credits
+            </button>
+          )}
+        </div>
+      )}
 
       <form id="session-setup-form" className="session-setup-form" onSubmit={handleSubmit}>
         <div className="session-setup-grid">
@@ -492,6 +548,23 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
         </label>
 
         <div className="session-setup-actions">
+          <button
+            type="submit"
+            className="session-setup-primary-button"
+            disabled={isStarting}
+            style={{
+              background: hasZeroCredits ? '#ef4444' : '#0284c7',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '10px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: isStarting ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isStarting ? 'Starting...' : hasZeroCredits ? 'You have 0 credits so buy it' : 'Start Session'}
+          </button>
           <button
             type="button"
             className="session-setup-secondary-button"

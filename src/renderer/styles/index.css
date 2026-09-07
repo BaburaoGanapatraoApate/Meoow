@@ -103,7 +103,7 @@
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
 }
 
-/* Header layout & responsive separation */
+/* Header layout & responsive separation - Single horizontal line guarantee */
 .header {
   min-width: 0 !important;
   width: 100% !important;
@@ -112,17 +112,18 @@
 
 .header-container {
   display: flex !important;
-  flex-wrap: wrap !important;
+  flex-wrap: nowrap !important;
   justify-content: space-between !important;
   align-items: center !important;
-  gap: 0.6rem !important;
+  gap: 0.4rem !important;
   width: 100% !important;
+  min-width: 0 !important;
 }
 
 .header-left {
   display: flex !important;
   align-items: center !important;
-  gap: 0.55rem !important;
+  gap: 0.45rem !important;
   flex-shrink: 0 !important;
   min-width: 0 !important;
 }
@@ -136,34 +137,44 @@
 }
 
 .header-left .app-title {
-  font-size: 1.15rem !important;
+  font-size: 1.1rem !important;
   font-weight: 750 !important;
   letter-spacing: -0.02em !important;
   color: #fff !important;
+  white-space: nowrap !important;
 }
 
 .header-right {
   display: flex !important;
-  flex-wrap: wrap !important;
+  flex-wrap: nowrap !important;
   align-items: center !important;
-  gap: 0.45rem !important;
+  gap: 0.35rem !important;
   justify-content: flex-end !important;
   min-width: 0 !important;
+  flex-shrink: 1 !important;
+}
+
+.session-controls {
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 0.3rem !important;
+  flex-shrink: 0 !important;
 }
 
 /* Connection status indicator */
 .copilot-connection-indicator {
-  font-size: 0.74rem !important;
-  padding: 3px 9px !important;
+  font-size: 0.72rem !important;
+  padding: 0 0.5rem !important;
   border-radius: 0.375rem !important;
   font-weight: 600 !important;
   white-space: nowrap !important;
   min-width: auto !important;
-  height: 1.9rem !important;
+  height: 1.85rem !important;
   flex-shrink: 0 !important;
   display: inline-flex !important;
   align-items: center !important;
-  gap: 0.35rem !important;
+  gap: 0.3rem !important;
 }
 
 .copilot-connection-indicator.connected {
@@ -198,23 +209,137 @@
   50% { opacity: 0.5; }
 }
 
+/* Compact session widgets for single-row header fit */
+.session-duration-indicator {
+  font-size: 0.74rem !important;
+  padding: 0 0.45rem !important;
+  height: 1.85rem !important;
+  border-radius: 0.375rem !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.auto-answer-toggle {
+  font-size: 0.72rem !important;
+  height: 1.85rem !important;
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  padding: 0 0.2rem !important;
+}
+
+.auto-answer-toggle input[type="checkbox"] {
+  width: 0.85rem !important;
+  height: 0.85rem !important;
+  margin: 0 !important;
+}
+
+.language-dropdown {
+  min-width: 70px !important;
+  height: 1.85rem !important;
+  padding: 0 0.4rem !important;
+  font-size: 0.74rem !important;
+  border-radius: 0.375rem !important;
+  flex-shrink: 0 !important;
+}
+
+.mic-button {
+  width: 1.85rem !important;
+  height: 1.85rem !important;
+  min-width: 1.85rem !important;
+  padding: 0 !important;
+  border-radius: 0.375rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+.mic-button svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+
+.analyze-button {
+  height: 1.85rem !important;
+  padding: 0 0.55rem !important;
+  font-size: 0.78rem !important;
+  gap: 0.25rem !important;
+  border-radius: 0.375rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+
+.analyze-button svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+
+.end-button {
+  height: 1.85rem !important;
+  padding: 0 0.55rem !important;
+  font-size: 0.78rem !important;
+  gap: 0.25rem !important;
+  border-radius: 0.375rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+
+.end-button svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
+.menu-trigger-button {
+  width: 1.85rem !important;
+  height: 1.85rem !important;
+  min-width: 1.85rem !important;
+  padding: 0 !important;
+  border-radius: 0.375rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+.menu-trigger-button svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
 /* ── User Credits Badge & Purchase Modal ── */
 .user-credits-badge {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 0.35rem !important;
-  padding: 0.25rem 0.65rem !important;
+  gap: 0.3rem !important;
+  height: 1.85rem !important;
+  padding: 0 0.55rem !important;
   border-radius: 9999px !important;
   background: rgba(56, 189, 248, 0.12) !important;
   border: 1px solid rgba(56, 189, 248, 0.35) !important;
   color: #38bdf8 !important;
-  font-size: 0.78rem !important;
+  font-size: 0.74rem !important;
   font-weight: 700 !important;
   cursor: pointer !important;
   transition: all 0.2s ease !important;
   user-select: none !important;
   pointer-events: auto !important;
   -webkit-app-region: no-drag !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
 }
 
 .user-credits-badge:hover {
@@ -224,19 +349,31 @@
   box-shadow: 0 4px 12px rgba(56, 189, 248, 0.2) !important;
 }
 
+.user-credits-badge.zero-credit-warning-badge {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.6) !important;
+  color: #fca5a5 !important;
+  animation: pulse-red 1.5s ease-in-out infinite !important;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; border-color: rgba(239, 68, 68, 0.6); }
+  50% { opacity: 0.85; border-color: rgba(239, 68, 68, 1); }
+}
+
 .user-credits-icon {
-  font-size: 0.85rem !important;
+  font-size: 0.8rem !important;
 }
 
 .user-buy-credits-btn {
   display: inline-flex !important;
   align-items: center !important;
-  margin-left: 0.25rem !important;
-  padding: 0.15rem 0.4rem !important;
+  margin-left: 0.2rem !important;
+  padding: 0.1rem 0.35rem !important;
   border-radius: 9999px !important;
   background: #0284c7 !important;
   color: #ffffff !important;
-  font-size: 0.68rem !important;
+  font-size: 0.65rem !important;
   font-weight: 700 !important;
   letter-spacing: 0.02em !important;
 }

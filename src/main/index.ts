@@ -221,6 +221,8 @@ function createWindow() {
   win = new BrowserWindow({
     width: winWidth,
     height: winHeight,
+    minWidth: 720,
+    minHeight: 300,
     x,
     y,
     frame: false,
@@ -284,14 +286,24 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    const allowedDomains = ["https://meow.app"];
+    const allowedDomains = [
+      "https://meooow.tech",
+      "https://www.meooow.tech",
+      "https://meow.app",
+    ];
     if (allowedDomains.some((domain) => url.startsWith(domain))) {
       shell.openExternal(url);
     }
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, navigationUrl) => {
-    const allowedOrigins = ["http://localhost:5173", "file://", "https://meow.app"];
+    const allowedOrigins = [
+      "http://localhost:5173",
+      "file://",
+      "https://meooow.tech",
+      "https://www.meooow.tech",
+      "https://meow.app",
+    ];
     if (!allowedOrigins.some((origin) => navigationUrl.startsWith(origin))) {
       event.preventDefault();
     }
@@ -314,20 +326,36 @@ function createWindow() {
 
   const isDevMode = !!process.env.VITE_DEV_SERVER_URL;
   const scriptSrc = isDevMode
-    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com;"
-    : "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com;";
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.razorpay.com https://*.razorpay.in https://cdnjs.cloudflare.com;"
+    : "script-src 'self' 'unsafe-inline' https://*.razorpay.com https://*.razorpay.in https://cdnjs.cloudflare.com;";
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const url = details.url.toLowerCase();
+    // Do NOT inject or overwrite CSP headers on external third-party resources (Razorpay, CDNs, fonts, etc.)
+    if (
+      url.includes("razorpay.com") ||
+      url.includes("razorpay.in") ||
+      url.includes("cloudflare.com") ||
+      url.includes("popclub.co") ||
+      url.includes("sentry-cdn.com") ||
+      url.includes("googleapis.com") ||
+      url.includes("gstatic.com")
+    ) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
           "default-src 'self' http://localhost:* blob: filesystem:;" +
-          "connect-src 'self' https://api.meooow.tech wss://api.meooow.tech https://api.razorpay.com https://checkout.razorpay.com https://lumberjack.razorpay.com http://localhost:* ws://localhost:* wss://localhost:* blob: filesystem:;" +
+          "connect-src 'self' https://api.meooow.tech wss://api.meooow.tech https://*.razorpay.com https://*.razorpay.in https://lumberjack.razorpay.com http: https: ws: wss: blob: filesystem:;" +
           "media-src 'self' http://localhost:* blob: filesystem:;" +
-          "img-src 'self' blob: data: filesystem: https://*.razorpay.com;" +
-          "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com;" +
+          "img-src 'self' blob: data: filesystem: https://*.razorpay.com https://*.razorpay.in;" +
+          "font-src 'self' data: https://*.razorpay.com https://*.razorpay.in https://fonts.gstatic.com;" +
+          "frame-src 'self' https://*.razorpay.com https://*.razorpay.in;" +
           scriptSrc +
-          "style-src 'self' 'unsafe-inline';",
+          "style-src 'self' 'unsafe-inline' https://*.razorpay.com https://*.razorpay.in https://fonts.googleapis.com;",
         ],
       },
     });

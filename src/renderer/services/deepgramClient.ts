@@ -99,13 +99,16 @@ export function createDeepgramConnection(
         const wsUrl = `${WS_BASE_URL}/ws/deepgram`;
         ws = new WebSocket(wsUrl);
 
-        ws.onopen = () => {
+        ws.onopen = async () => {
+          const deviceIdentity = await window.meow?.getDeviceIdentity?.();
           // Send initial authentication & configuration payload
           ws?.send(
             JSON.stringify({
               type: 'auth',
               token,
               language: language || 'en',
+              deviceId: deviceIdentity?.deviceId,
+              deviceToken: deviceIdentity?.deviceToken,
             })
           );
         };
