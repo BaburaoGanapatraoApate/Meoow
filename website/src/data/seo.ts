@@ -1,4 +1,4 @@
-import { CANONICAL_DOMAIN, BRAND_NAME, PRODUCT_NAME, METRICS } from '../utils/constants';
+import { CANONICAL_DOMAIN, BRAND_NAME, PRODUCT_NAME, METRICS, APP_VERSION, OFFICIAL_WINDOWS_DOWNLOAD_URL } from '../utils/constants';
 import { BlogPost } from './blogPosts';
 
 export interface PageSeoConfig {
@@ -111,6 +111,8 @@ export const getSoftwareApplicationSchema = () => ({
   ],
   operatingSystem: 'Windows 10, Windows 11 (64-bit)',
   applicationCategory: 'DeveloperApplication',
+  softwareVersion: APP_VERSION,
+  downloadUrl: OFFICIAL_WINDOWS_DOWNLOAD_URL,
   offers: {
     '@type': 'Offer',
     price: '0.00',

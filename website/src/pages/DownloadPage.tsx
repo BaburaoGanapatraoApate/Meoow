@@ -1,12 +1,18 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { SectionHeading } from '../components/ui/SectionHeading';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
 import { Accordion } from '../components/ui/Accordion';
 import { CtaSection } from '../components/ui/CtaSection';
 import { DOWNLOAD_FAQS } from '../data/faqs';
-import { METRICS } from '../utils/constants';
+import {
+  APP_VERSION,
+  WINDOWS_INSTALLER_FILENAME,
+  WINDOWS_INSTALLER_SIZE,
+  WINDOWS_INSTALLER_SHA256,
+  OFFICIAL_WINDOWS_DOWNLOAD_URL,
+  GITHUB_RELEASE_PAGE_URL,
+} from '../utils/constants';
 import { useAuth } from '../context/AuthContext';
 import {
   Download,
@@ -15,31 +21,17 @@ import {
   Gift,
   CheckCircle2,
   Sparkles,
-  Info,
-  ArrowRight,
 } from 'lucide-react';
 
 export const DownloadPage: React.FC = () => {
   const { isAuthenticated, user } = useAuth();
-  const [showStatusNotice, setShowStatusNotice] = useState(false);
 
-  // Check if a real public installer URL is configured via environment
-  const publicDownloadUrl = import.meta.env.VITE_PUBLIC_WINDOWS_DOWNLOAD_URL;
-  const hasLiveInstaller = Boolean(
-    publicDownloadUrl &&
-    typeof publicDownloadUrl === 'string' &&
-    publicDownloadUrl.trim().startsWith('http')
-  );
-
-  const handleDownloadClick = (e: React.MouseEvent) => {
-    if (hasLiveInstaller) {
-      // Let standard link navigation open the real download URL
-      return;
-    }
-    // Prevent dummy page navigation and show honest release status
-    e.preventDefault();
-    setShowStatusNotice(true);
-  };
+  // Public installer download URL (environment override, falling back to the official production release asset)
+  const envDownloadUrl = import.meta.env.VITE_PUBLIC_WINDOWS_DOWNLOAD_URL;
+  const publicDownloadUrl =
+    typeof envDownloadUrl === 'string' && envDownloadUrl.trim().startsWith('http')
+      ? envDownloadUrl.trim()
+      : OFFICIAL_WINDOWS_DOWNLOAD_URL;
 
   return (
     <div className="space-y-20 sm:space-y-28 py-12">
@@ -89,56 +81,40 @@ export const DownloadPage: React.FC = () => {
               <Monitor className="w-4 h-4 text-brand-purple-600" />
               Windows 10 / 11 (64-bit)
             </span>
-            <span className="font-mono bg-slate-100 px-2.5 py-0.5 rounded text-slate-600 font-medium">
-              {METRICS.releaseLabel}
+            <span className="font-mono bg-purple-50 text-brand-purple-700 border border-purple-200 px-2.5 py-0.5 rounded-full font-semibold">
+              v{APP_VERSION}
             </span>
           </div>
 
           <div className="space-y-3">
-            {hasLiveInstaller ? (
-              <a
-                href={publicDownloadUrl}
-                download
-                className="inline-flex items-center justify-center w-full px-6 py-4 rounded-xl font-bold bg-brand-purple-600 text-white hover:bg-brand-purple-700 shadow-lg shadow-brand-purple-500/25 transition-all text-base sm:text-lg"
-              >
-                <Download className="w-5 h-5 mr-2" />
-                Download Windows Client (.exe)
-              </a>
-            ) : (
-              <Button
-                onClick={handleDownloadClick}
-                size="lg"
-                variant="primary"
-                className="w-full justify-center text-base sm:text-lg shadow-lg shadow-brand-purple-500/25 py-4 cursor-pointer"
-              >
-                <Download className="w-5 h-5 mr-2" />
-                <span>Download Windows Client (.exe)</span>
-              </Button>
-            )}
+            <a
+              href={publicDownloadUrl}
+              download={WINDOWS_INSTALLER_FILENAME}
+              className="inline-flex items-center justify-center w-full px-6 py-4 rounded-xl font-bold bg-brand-purple-600 text-white hover:bg-brand-purple-700 shadow-lg shadow-brand-purple-500/25 transition-all text-base sm:text-lg group"
+            >
+              <Download className="w-5 h-5 mr-2 group-hover:-translate-y-0.5 transition-transform" />
+              Download Windows Client (.exe)
+            </a>
 
-            {/* Informational Release Status Notice if live installer URL is not yet attached */}
-            {showStatusNotice && !hasLiveInstaller && (
-              <div className="p-4 rounded-xl bg-slate-900 text-white text-xs text-left space-y-2 animate-in fade-in-50 duration-200">
-                <div className="flex items-center gap-2 font-bold text-brand-purple-400">
-                  <Info className="w-4 h-4 flex-shrink-0" />
-                  <span>Windows Installer Distribution Ready</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed text-[11px]">
-                  The official Windows desktop installer binary will be distributed upon production launch. Create your free account now to secure your 30 free starting credits!
-                </p>
-                {!isAuthenticated && (
-                  <div className="pt-1">
-                    <Button href="/signup" variant="primary" size="sm" className="w-full justify-center">
-                      Sign Up & Reserve 30 Free Credits
-                      <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                    </Button>
-                  </div>
-                )}
+            <div className="text-[12px] text-slate-500 text-center space-y-1.5 pt-1">
+              <div className="font-medium text-slate-600">
+                {WINDOWS_INSTALLER_FILENAME} • {WINDOWS_INSTALLER_SIZE} • Direct Setup
               </div>
-            )}
-
-            <div className="text-[11px] text-slate-500 text-center pt-1">
-              Official 64-bit Windows Desktop Installer • Direct Setup
+              <div className="text-[11px] text-slate-400 flex flex-wrap items-center justify-center gap-1">
+                <span>SHA-256:</span>
+                <span className="font-mono select-all text-slate-500 font-semibold" title={WINDOWS_INSTALLER_SHA256}>
+                  {WINDOWS_INSTALLER_SHA256.substring(0, 16)}...{WINDOWS_INSTALLER_SHA256.substring(WINDOWS_INSTALLER_SHA256.length - 8)}
+                </span>
+                <span>•</span>
+                <a
+                  href={GITHUB_RELEASE_PAGE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-brand-purple-600 hover:text-brand-purple-700 transition-colors font-medium"
+                >
+                  GitHub Release
+                </a>
+              </div>
             </div>
           </div>
 
