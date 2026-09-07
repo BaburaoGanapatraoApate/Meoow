@@ -358,7 +358,7 @@ export function registerIpcHandlers(
           minHeight: 600,
           show: false,
           transparent: false,
-          backgroundColor: "#0f172a",
+          backgroundColor: "#ffffff",
           alwaysOnTop: true,
           frame: true,
           title: "Meoow - Secure Razorpay Checkout",
@@ -371,6 +371,10 @@ export function registerIpcHandlers(
             nodeIntegration: false,
             sandbox: false,
           },
+        });
+
+        activePaymentWin.webContents.setWindowOpenHandler(() => {
+          return { action: 'allow' };
         });
 
         let isResolved = false;

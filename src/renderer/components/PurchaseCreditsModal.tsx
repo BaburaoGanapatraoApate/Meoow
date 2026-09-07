@@ -96,6 +96,7 @@ export function PurchaseCreditsModal({ isOpen, onClose }: PurchaseCreditsModalPr
         },
         theme: {
           color: '#0284c7',
+          backdrop_color: '#ffffff',
         },
       };
 
