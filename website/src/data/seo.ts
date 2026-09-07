@@ -169,7 +169,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
     ],
   },
   '/features': {
-    title: 'Features — Voice Transcription, Screen OCR & AI Copilot | Meoow AI',
+    title: 'Features | Voice Transcription, Screen OCR & AI Copilot | Meoow AI',
     metaDescription:
       'Explore Meoow AI features: Deepgram real-time voice transcription, Groq sub-second (~0.2s) reasoning, one-key screen OCR capture (Ctrl+Shift+A), and discrete desktop overlay.',
     canonicalUrl: `${CANONICAL_DOMAIN}/features`,
@@ -180,14 +180,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'Groq AI interview copilot',
       'technical interview overlay',
     ],
-    ogTitle: 'Features — Voice Transcription, Screen OCR & Fast AI Copilot | Meoow AI',
+    ogTitle: 'Features | Voice Transcription, Screen OCR & Fast AI Copilot | Meoow AI',
     ogDescription:
       'Discover sub-second AI inference, real-time voice transcription, resume-tailored answers, and non-intrusive desktop hotkeys.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/how-it-works': {
-    title: 'How It Works — Step-by-Step AI Interview Preparation | Meoow AI',
+    title: 'How It Works | Step-by-Step AI Interview Preparation | Meoow AI',
     metaDescription:
       'Learn how Meoow AI operates: download the desktop client, press hotkeys to capture problem statements, receive sub-second AI hints, and master technical interviews.',
     canonicalUrl: `${CANONICAL_DOMAIN}/how-it-works`,
@@ -197,14 +197,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'technical interview practice steps',
       'real-time interview assistant workflow',
     ],
-    ogTitle: 'How It Works — Step-by-Step AI Interview Preparation | Meoow AI',
+    ogTitle: 'How It Works | Step-by-Step AI Interview Preparation | Meoow AI',
     ogDescription:
       'See how Meoow captures live audio, reads coding problems with OCR, and streams structured hints with ~0.2s latency.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/demo': {
-    title: 'Interactive Demo — Test Live AI Interview Assistance | Meoow AI',
+    title: 'Interactive Demo | Test Live AI Interview Assistance | Meoow AI',
     metaDescription:
       'Experience Meoow AI in an interactive browser demo. Simulate DSA problem extraction, system design scoping, and behavioral STAR answers in real time.',
     canonicalUrl: `${CANONICAL_DOMAIN}/demo`,
@@ -214,14 +214,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'try AI interview copilot',
       'DSA mock interview demo',
     ],
-    ogTitle: 'Interactive Demo — Test Live AI Interview Assistance | Meoow AI',
+    ogTitle: 'Interactive Demo | Test Live AI Interview Assistance | Meoow AI',
     ogDescription:
       'Test DSA problem solving, system design diagrams, and behavioral STAR framing live in our interactive demo.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/credits': {
-    title: 'Pricing & Credits — Transparent Pay-As-You-Go | Meoow AI',
+    title: 'Pricing & Credits | Transparent Pay-As-You-Go | Meoow AI',
     metaDescription:
       'Simple, student-friendly AI interview pricing. Get 30 free starting credits on signup, then purchase packs of 40 credits for just ₹100. No recurring subscriptions.',
     canonicalUrl: `${CANONICAL_DOMAIN}/credits`,
@@ -232,7 +232,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'affordable coding interview help',
       'cheap AI interview assistant',
     ],
-    ogTitle: 'Pricing & Credits — Transparent Pay-As-You-Go | Meoow AI',
+    ogTitle: 'Pricing & Credits | Transparent Pay-As-You-Go | Meoow AI',
     ogDescription:
       'Get 30 free credits on registration. Top up anytime with ₹100 for 40 credits. Zero recurring subscriptions or hidden fees.',
     ogType: 'website',
@@ -256,7 +256,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/about': {
-    title: 'About Us — Empowering Engineers in Technical Interviews | Meoow AI',
+    title: 'About Us | Empowering Engineers in Technical Interviews | Meoow AI',
     metaDescription:
       'Learn about the mission behind Meoow AI: making elite technical interview preparation accessible, transparent, and affordable for software engineers globally.',
     canonicalUrl: `${CANONICAL_DOMAIN}/about`,
@@ -266,7 +266,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'technical interview preparation team',
       'software engineering interview coaching',
     ],
-    ogTitle: 'About Us — Empowering Engineers in Technical Interviews | Meoow AI',
+    ogTitle: 'About Us | Empowering Engineers in Technical Interviews | Meoow AI',
     ogDescription:
       'Building ultra-low-latency, privacy-focused AI tools to help engineers showcase their best capabilities in technical interviews.',
     ogType: 'website',
@@ -274,7 +274,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
     structuredData: getGlobalOrganizationSchema(),
   },
   '/blog': {
-    title: 'Blog — Technical Interview Prep, DSA & AI Guides | Meoow AI',
+    title: 'Blog | Technical Interview Prep, DSA & AI Guides | Meoow AI',
     metaDescription:
       'In-depth engineering guides, algorithmic patterns, system design frameworks, behavioral interview strategies, and AI interview preparation insights.',
     canonicalUrl: `${CANONICAL_DOMAIN}/blog`,
@@ -286,14 +286,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'AI interview assistant guides',
       'free interview tools',
     ],
-    ogTitle: 'Blog — Technical Interview Prep, DSA & AI Guides | Meoow AI',
+    ogTitle: 'Blog | Technical Interview Prep, DSA & AI Guides | Meoow AI',
     ogDescription:
       'Read in-depth guides on DSA patterns, system design scaling, STAR behavioral framing, and effective AI-assisted preparation.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/support': {
-    title: 'Help & Support — FAQs & Technical Assistance | Meoow AI',
+    title: 'Help & Support | FAQs & Technical Assistance | Meoow AI',
     metaDescription:
       'Get help with Meoow AI: troubleshooting desktop permissions, audio setup, credit balance, Razorpay billing, and contact our engineering support team.',
     canonicalUrl: `${CANONICAL_DOMAIN}/support`,
@@ -303,14 +303,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'desktop audio setup troubleshooting',
       'AI interview assistant customer service',
     ],
-    ogTitle: 'Help & Support — FAQs & Technical Assistance | Meoow AI',
+    ogTitle: 'Help & Support | FAQs & Technical Assistance | Meoow AI',
     ogDescription:
       'Find answers to setup questions, audio configuration, credit packages, and reach out to our support team.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/privacy': {
-    title: 'Privacy Policy — Ephemeral Audio & Data Protection | Meoow AI',
+    title: 'Privacy Policy | Ephemeral Audio & Data Protection | Meoow AI',
     metaDescription:
       'Read the Meoow AI Privacy Policy. We process voice audio ephemerally, never store raw meeting recordings, and encrypt all user data in transit and at rest.',
     canonicalUrl: `${CANONICAL_DOMAIN}/privacy`,
@@ -320,14 +320,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'interview data security',
       'AI privacy standards',
     ],
-    ogTitle: 'Privacy Policy — Ephemeral Audio & Data Protection | Meoow AI',
+    ogTitle: 'Privacy Policy | Ephemeral Audio & Data Protection | Meoow AI',
     ogDescription:
       'Learn how Meoow protects candidate privacy with zero audio retention, end-to-end encryption, and strict data governance.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/terms': {
-    title: 'Terms of Service — Usage Guidelines & Policies | Meoow AI',
+    title: 'Terms of Service | Usage Guidelines & Policies | Meoow AI',
     metaDescription:
       'Review the Terms of Service for Meoow AI desktop application and website. Understand credit terms, acceptable use policies, and software licensing.',
     canonicalUrl: `${CANONICAL_DOMAIN}/terms`,
@@ -336,14 +336,14 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'software license terms',
       'acceptable use policy',
     ],
-    ogTitle: 'Terms of Service — Usage Guidelines & Policies | Meoow AI',
+    ogTitle: 'Terms of Service | Usage Guidelines & Policies | Meoow AI',
     ogDescription:
       'Read the official Terms of Service governing the use of Meoow AI desktop software and web services.',
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
   },
   '/download': {
-    title: 'Download Meoow AI for Windows — Free Desktop Client (30 Credits)',
+    title: 'Download Meoow AI for Windows | Free Desktop Client (30 Credits)',
     metaDescription:
       'Download Meoow AI for Windows 10 & 11 (64-bit). Real-time speech transcription, one-key screen OCR, and sub-second Groq AI assistance. Includes 30 free credits.',
     canonicalUrl: `${CANONICAL_DOMAIN}/download`,
@@ -353,7 +353,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
       'free AI interview software Windows',
       'coding interview copilot desktop app',
     ],
-    ogTitle: 'Download Meoow AI for Windows — Free Desktop Client (30 Credits)',
+    ogTitle: 'Download Meoow AI for Windows | Free Desktop Client (30 Credits)',
     ogDescription:
       'Get the native Windows desktop client with 30 free starting credits. Real-time audio transcription and instant screen OCR.',
     ogType: 'website',
@@ -368,7 +368,7 @@ export const STATIC_PAGE_SEO: Record<string, PageSeoConfig> = {
     noIndex: true,
   },
   '/signup': {
-    title: 'Create an Account — Get 30 Free Credits | Meoow AI',
+    title: 'Create an Account | Get 30 Free Credits | Meoow AI',
     metaDescription: 'Create a free Meoow AI account and instantly claim 30 free credits for real-time AI interview practice.',
     canonicalUrl: `${CANONICAL_DOMAIN}/signup`,
     keywords: ['Meoow AI signup', 'register free interview credits'],

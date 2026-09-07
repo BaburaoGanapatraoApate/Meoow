@@ -27,6 +27,53 @@ import {
   Home,
 } from 'lucide-react';
 
+function renderInlineContent(text: string): React.ReactNode {
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  if (!linkRegex.test(text)) {
+    return text;
+  }
+  linkRegex.lastIndex = 0;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    const linkText = match[1];
+    const linkUrl = match[2];
+    if (linkUrl.startsWith('/')) {
+      parts.push(
+        <Link
+          key={`${match.index}-${linkUrl}`}
+          to={linkUrl}
+          className="text-brand-purple-600 font-semibold hover:underline hover:text-brand-purple-700 transition"
+        >
+          {linkText}
+        </Link>
+      );
+    } else {
+      parts.push(
+        <a
+          key={`${match.index}-${linkUrl}`}
+          href={linkUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-brand-purple-600 font-semibold hover:underline hover:text-brand-purple-700 transition"
+        >
+          {linkText}
+        </a>
+      );
+    }
+    lastIndex = linkRegex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+  return parts;
+}
+
 export const BlogPostPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const [copiedLink, setCopiedLink] = useState(false);
@@ -74,11 +121,17 @@ export const BlogPostPage: React.FC = () => {
     getBreadcrumbSchema(breadcrumbItems),
   ];
 
+  // Avoid redundant brand suffix if the article meta title already contains or ends with the brand
+  const pageTitle =
+    post.metaTitle.includes('Meoow AI') || post.metaTitle.includes('Meoow')
+      ? post.metaTitle
+      : `${post.metaTitle} | Meoow AI`;
+
   return (
     <div className="py-12 space-y-16">
       {/* 0. SEO HEAD CONFIGURATION */}
       <SeoHead
-        title={`${post.metaTitle} | Meoow AI`}
+        title={pageTitle}
         metaDescription={post.metaDescription}
         canonicalUrl={post.canonicalUrl}
         keywords={post.tags}
@@ -245,7 +298,7 @@ export const BlogPostPage: React.FC = () => {
                 }
                 return (
                   <p key={idx} className="text-base text-slate-700 leading-relaxed my-4">
-                    {paragraph}
+                    {renderInlineContent(paragraph)}
                   </p>
                 );
               })}

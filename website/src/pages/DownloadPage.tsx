@@ -11,7 +11,6 @@ import {
   WINDOWS_INSTALLER_SIZE,
   WINDOWS_INSTALLER_SHA256,
   OFFICIAL_WINDOWS_DOWNLOAD_URL,
-  GITHUB_RELEASE_PAGE_URL,
 } from '../utils/constants';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -104,20 +103,11 @@ export const DownloadPage: React.FC = () => {
               <div className="font-medium text-slate-600">
                 {WINDOWS_INSTALLER_FILENAME} • {WINDOWS_INSTALLER_SIZE} • Direct Setup
               </div>
-              <div className="text-[11px] text-slate-400 flex flex-wrap items-center justify-center gap-1">
+              <div className="text-[11px] text-slate-400 flex items-center justify-center gap-1">
                 <span>SHA-256:</span>
                 <span className="font-mono select-all text-slate-500 font-semibold" title={WINDOWS_INSTALLER_SHA256}>
                   {WINDOWS_INSTALLER_SHA256.substring(0, 16)}...{WINDOWS_INSTALLER_SHA256.substring(WINDOWS_INSTALLER_SHA256.length - 8)}
                 </span>
-                <span>•</span>
-                <a
-                  href={GITHUB_RELEASE_PAGE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline text-brand-purple-600 hover:text-brand-purple-700 transition-colors font-medium"
-                >
-                  GitHub Release
-                </a>
               </div>
             </div>
           </div>

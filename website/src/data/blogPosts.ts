@@ -18,6 +18,201 @@ export interface BlogPost {
 
 export const BLOG_POSTS: BlogPost[] = [
   {
+    slug: 'meoow-ai-v1-0-0-production-release',
+    title: 'Meoow AI v1.0.0: The Real-Time AI Interview Copilot Is Now Available',
+    metaTitle: 'Meoow AI v1.0.0 | Real-Time AI Interview Copilot',
+    metaDescription:
+      'Meoow AI v1.0.0 is now available: a real-time AI interview copilot with live transcription, AI assistance, and interview preparation tools for software engineers.',
+    excerpt:
+      'Announcing the production release of Meoow AI v1.0.0: a lightweight, real-time desktop copilot featuring live speech transcription, single-key screen OCR capture, and sub-second technical interview guidance for software engineers.',
+    category: 'AI Interview Help',
+    author: 'Meoow Engineering Team',
+    date: 'September 7, 2026',
+    readTime: '8 min read',
+    tags: [
+      'Meoow AI v1.0.0',
+      'Release Announcement',
+      'AI Interview Copilot',
+      'Real-Time Transcription',
+      'Windows Desktop App',
+      'Technical Interview Prep',
+    ],
+    canonicalUrl: 'https://meooow.tech/blog/meoow-ai-v1-0-0-production-release',
+    tableOfContents: [
+      { id: 'announcement', title: 'Meoow AI v1.0.0 Production Release' },
+      { id: 'what-is-meoow', title: 'What Is Meoow AI?' },
+      { id: 'whats-new', title: "What's New in Meoow v1.0.0" },
+      { id: 'how-meoow-works', title: 'How Meoow Works in Practice' },
+      { id: 'who-is-meoow-for', title: 'Who Is Meoow AI Built For?' },
+      { id: 'credits-and-pricing', title: 'Credits Model and Transparent Pricing' },
+      { id: 'educational-value', title: 'Why Real-Time Assistance Matters for Preparation' },
+      { id: 'getting-started', title: 'Getting Started with Meoow AI' },
+      { id: 'whats-next', title: "Meoow AI v1.0.0: What's Next?" },
+      { id: 'faqs', title: 'Frequently Asked Questions' },
+    ],
+    content: `## Meoow AI v1.0.0 Production Release {#announcement}
+
+Today, we are excited to announce the general availability of **Meoow AI v1.0.0**, our official production release designed to support software engineers throughout technical interview practice and live preparation workflows.
+
+Engineering interviews can be daunting. Between deciphering algorithmic constraints under strict time limits, framing distributed system architectures on the fly, and articulating complex behavioral experiences, candidates are expected to perform under high cognitive pressure. Meoow was created to bridge the gap between solitary study and real-time interview dynamics.
+
+With the v1.0.0 release, candidates can now download the native 64-bit Windows desktop companion directly from [download Meoow AI for Windows](/download), verify their account to [start with 30 free credits](/signup), and experience sub-second AI reasoning tailored specifically for software engineering discussions.
+
+## What Is Meoow AI? {#what-is-meoow}
+
+Meoow AI is an interactive, real-time desktop copilot and preparation assistant for software engineers. Unlike standard chatbots that require manual copy-pasting into a browser tab, Meoow operates as a discreet, lightweight desktop overlay that listens to live meeting audio, reads coding problems directly from your screen, and streams structured hints with near-zero latency.
+
+Whether you are walking through a tricky dynamic programming recurrence, defending consistency trade-offs in a system design review, or structuring a past project using the STAR method, Meoow provides timely, structured hints that help you think clearly and communicate effectively.
+
+To [learn more about Meoow AI](/about) and our foundational architectural principles, explore our mission to make high-caliber interview coaching accessible and transparent to developers worldwide.
+
+## What's New in Meoow v1.0.0 {#whats-new}
+
+The v1.0.0 milestone represents a fully hardened, end-to-end production platform encompassing both the native Windows client and our secure cloud backend. Here are the core capabilities available today:
+
+### Real-Time Interview Transcription
+
+Meoow features dual-channel speech-to-text processing powered by Deepgram Nova-3. During mock interviews or live practice sessions, the desktop audio engine captures spoken questions with high accuracy, recognizing technical jargon, programming terminology, and framework names without latency bottlenecks. Spoken interviewer statements appear immediately in your desktop overlay feed.
+
+### AI-Powered Interview Assistance
+
+Once a question or discussion point is captured, Meoow routes the prompt through Groq LPU hardware acceleration gateways via our secure backend. Responses stream back in as little as **~0.2s**. Rather than generating long, overwhelming text blocks, Meoow delivers succinct, structured bullet points covering:
+- Problem constraints and potential edge cases
+- Algorithmic approaches with Big-O time and space complexity trade-offs
+- Core architectural components for system design discussions
+- STAR method talking points for behavioral scenarios
+
+### Screen and OCR Assistance
+
+When facing online coding assessments or browser-based IDE challenges, manually transcribing problem text wastes valuable minutes. With Meoow v1.0.0, pressing Ctrl+Shift+A triggers single-key screen capture with optical character recognition (OCR). The system extracts problem statements, function signatures, and input/output examples directly into the AI context for immediate analysis. For a full breakdown of hotkeys, see our [keyboard shortcuts guide](/shortcuts).
+
+### Windows Desktop Experience
+
+Meoow v1.0.0 is delivered as an optimized 64-bit desktop client for Windows 10 and Windows 11. Key desktop features include:
+- A discreet floating window with adjustable opacity sliders (10% to 100%) to suit your desktop configuration
+- Quick visibility toggling (Ctrl+Shift+H) to instantly hide or show the overlay
+- Single-click code snippet copying (Ctrl+Shift+C)
+- Native hardware acceleration with minimal CPU and memory footprint
+
+For an interactive preview of how these capabilities feel in action, check out our [interactive browser demo](/demo).
+
+## How Meoow Works in Practice {#how-meoow-works}
+
+Getting started with Meoow is designed to be straightforward and frictionless:
+
+1. Create an Account: Register with your email address at our signup portal.
+2. Verify via OTP: Enter the 6-digit one-time password sent to your inbox to authenticate your profile.
+3. Claim Starter Credits: Upon verification, your account is immediately credited with 30 free starting credits.
+4. Launch the Windows Client: Download and run the lightweight installer from the [download page](/download), then sign in with your verified credentials.
+5. Engage Your Practice Session: Position the discreet overlay, enable microphone audio, and use Ctrl+Shift+A to capture on-screen coding challenges.
+6. Top Up as Needed: Purchase affordable credit packs anytime via secure Razorpay checkout to continue your preparation.
+
+For a detailed walkthrough of the end-to-end workflow, read our guide on [step-by-step preparation workflow](/how-it-works).
+
+## Who Is Meoow AI Built For? {#who-is-meoow-for}
+
+Meoow is engineered specifically for software engineers at various career stages:
+
+- Computer Science Students and Recent Graduates: Practicing technical assessments, mastering core algorithms, and building confidence in technical communication.
+- Experienced Software Engineers: Brushing up on data structures, distributed systems design, and behavioral framing after years of focusing on day-to-day product engineering.
+- Career Changers and Bootcamp Graduates: Bridging the gap between practical web development and rigorous computer science interview expectations.
+- Engineers Preparing for Coding Rounds: Seeking realistic mock simulations with instant feedback rather than passive reading.
+
+To learn how other developers structure their study plans, see our [technical interview preparation checklist](/blog/technical-interview-preparation-checklist).
+
+## Credits Model and Transparent Pricing {#credits-and-pricing}
+
+We believe elite interview preparation tools should be affordable and transparent, with zero predatory recurring subscriptions:
+
+- 30 Free Starting Credits: Every newly verified user receives 30 complimentary credits upon registration with no credit card required.
+- Simple Credit Definition: 1 credit = 1 generated AI answer. Audio transcription and screen reading do not consume separate credits.
+- Pay-As-You-Go Packs: When you need more credits, top up with ₹100 for 40 credits via secure domestic and international payment gateways.
+- No Recurring Fees: Credits never expire. You only pay for what you actually use during your interview season.
+
+Visit our [transparent credit packages](/credits) page to review pricing options and credit management details.
+
+## Why Real-Time Assistance Matters for Preparation {#educational-value}
+
+Solitary preparation on LeetCode often reinforces an illusion of competence: candidates stare at a problem for an hour, peek at the editorial solution, and assume they understand the pattern. But in a live interview, the challenge is not just knowing an algorithm—it is identifying constraints under time pressure and articulating trade-offs clearly.
+
+Meoow transforms preparation into active cognitive training:
+- Overcoming Freezing: When a problem looks unfamiliar, sub-second hints give candidates the conceptual spark needed to begin decomposing the problem logically.
+- Learning Socratic Pattern Matching: By highlighting edge cases such as integer overflow or cyclical graphs, Meoow trains candidates to proactively ask clarifying questions.
+- Simulating Real Discussion: Dual-channel voice transcription helps candidates practice listening actively to interviewer prompts rather than rushing into code.
+
+For deeper insights into how to use AI responsibly during your study regimen, read our article on [using AI without losing critical thinking](/blog/using-ai-for-interviews-without-losing-critical-thinking).
+
+## Getting Started with Meoow AI {#getting-started}
+
+You can begin using Meoow AI v1.0.0 today:
+
+1. [Download Meoow AI for Windows](/download) to install the official desktop client.
+2. [Register for your free account](/signup) to instantly claim your 30 free starter credits.
+3. Review our [features overview](/features) and [keyboard shortcuts guide](/shortcuts) to master the desktop hotkeys.
+4. Deepen your algorithmic knowledge with our guides on [mastering DSA interviews with AI](/blog/dsa-interview-preparation-ai), [system design interview framework](/blog/system-design-interview-ai-framework), and [behavioral interview STAR method guide](/blog/behavioral-interview-preparation-ai).
+
+## Meoow AI v1.0.0: What's Next? {#whats-next}
+
+The release of v1.0.0 is the foundational step in our journey to build the most responsive interview companion for software engineers. As we continue gathering candidate feedback, our engineering roadmap includes:
+
+- Expanded specialized practice tracks for high-concurrency systems and frontend architectural rounds.
+- Deeper customizable mock interview configurations tailored to company-specific interview rubrics.
+- Active technical evaluation of cross-platform desktop options.
+
+We are committed to delivering low-latency, privacy-first software that empowers engineers to showcase their true problem-solving capabilities.
+
+## Frequently Asked Questions {#faqs}
+
+Got questions about the v1.0.0 production release? Here are clear answers to common inquiries:`,
+    faqs: [
+      {
+        question: 'What is Meoow AI?',
+        answer:
+          'Meoow AI is a real-time AI interview copilot and preparation assistant for software engineers. It combines live speech transcription, one-key screen OCR capture, and sub-second Groq AI guidance in a sleek Windows desktop overlay.',
+      },
+      {
+        question: "What is new in the v1.0.0 production release?",
+        answer:
+          'The v1.0.0 release introduces our production-hardened Windows desktop client, Deepgram Nova-3 voice diarization, sub-second Groq LPU reasoning gateways (~0.2s), single-key screen capture (Ctrl+Shift+A), floating overlay opacity controls, and seamless account credit management.',
+      },
+      {
+        question: 'Does Meoow AI work on Windows?',
+        answer:
+          'Yes. Meoow v1.0.0 is officially built and packaged for 64-bit Windows 10 and Windows 11 desktop environments.',
+      },
+      {
+        question: 'How does real-time voice transcription work?',
+        answer:
+          'Meoow captures interviewer speech through high-accuracy Deepgram Nova-3 audio engines mediated securely through our production backend, transcribing questions and technical terms into structured text in real time.',
+      },
+      {
+        question: 'Is Meoow AI free to start?',
+        answer:
+          'Yes. Every verified user receives 30 complimentary starter credits upon email registration, with no credit card required.',
+      },
+      {
+        question: 'How do Meoow AI credits work?',
+        answer:
+          'One credit equals one generated AI answer. Transcription and screen OCR do not consume separate credits. When your free credits run out, you can top up anytime with packages of 40 credits for ₹100.',
+      },
+      {
+        question: 'Where can I download Meoow AI for Windows?',
+        answer:
+          'You can download the official production installer directly from our website download page at meooow.tech/download.',
+      },
+      {
+        question: 'Who is Meoow AI designed for?',
+        answer:
+          'Meoow is designed for software engineers, computer science students, and career changers preparing for technical interviews, DSA coding rounds, system design discussions, and behavioral interviews.',
+      },
+    ],
+    relatedSlugs: [
+      'ai-interview-assistant-guide',
+      'real-time-ai-interview-assistance-explained',
+      'technical-interview-preparation-checklist',
+    ],
+  },
+  {
     slug: 'ai-interview-assistant-guide',
     title: 'AI Interview Assistant: How to Prepare for Technical Interviews With AI',
     metaTitle: 'AI Interview Assistant: Complete Technical Interview Preparation Guide (2026)',
