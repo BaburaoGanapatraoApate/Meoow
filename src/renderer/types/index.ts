@@ -40,6 +40,11 @@ export interface Answer {
   source?: string;
   requestId?: string;
   outcome?: string;
+  isError?: boolean;
+  errorCode?: string;
+  retryAfterSeconds?: number;
+  finishReason?: string;
+  isComplete?: boolean;
 }
 
 export interface AnswerScreenshots {
@@ -81,6 +86,7 @@ export interface SessionContext {
   experienceLevel: string;
   interviewRound: string;
   streamingModel: string;
+  visionModel?: string;
   notes: string;
   resumeText: string;
   language: string;
@@ -188,14 +194,12 @@ export interface GroqModel {
 }
 
 export const GROQ_MODELS: GroqModel[] = [
-  { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B' },
-  { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant', badge: 'Fast' },
-  { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 70B' },
-  { id: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B', badge: 'Fast' },
-  { id: 'gemma2-9b-it', label: 'Gemma 2 9B', badge: 'Fast' },
+  { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B', badge: 'Fast' },
+  { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B' },
+  { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B', badge: 'Fast' },
 ];
 
-export const VISION_MODEL = 'llama-3.2-90b-vision-preview';
+export const VISION_MODEL = 'qwen/qwen3.6-27b';
 
 // ─── Interview Rounds ───
 export interface InterviewRound {
@@ -287,4 +291,155 @@ export interface CaptureAPI {
   onStartCapture(cb: () => void): () => void;
   onStopCapture(cb: () => void): () => void;
 }
+
+// ─── Task & Quality Types (Phase 1 & Phase 2) ───
+export type TaskType =
+  | 'CODING'
+  | 'SQL'
+  | 'DEBUGGING'
+  | 'CONCEPTUAL'
+  | 'THEORETICAL_CONCEPT'
+  | 'CASE_STUDY'
+  | 'SYSTEM_DESIGN'
+  | 'ML_DESIGN'
+  | 'MCQ'
+  | 'BEHAVIORAL'
+  | 'HR'
+  | 'DATA_INTERPRETATION'
+  | 'PRODUCT_SCENARIO'
+  | 'GENERAL_TECHNICAL'
+  | 'FOLLOW_UP'
+  | 'CLARIFICATION'
+  | 'COMPARISON'
+  | 'RESUME_DRILLDOWN';
+
+export type ConfidenceTier = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface TaskClassificationResult {
+  taskType: TaskType;
+  parentTaskType?: TaskType;
+  confidence: number; // 0 to 1
+  tier: ConfidenceTier;
+  rationale: string;
+  suggestedDepth: 'SHORT' | 'NORMAL' | 'DEEP';
+  requiresCode: boolean;
+}
+
+
+export interface CompactScreenObservation {
+  observationId: string;
+  timestamp: string;
+  taskType?: TaskType;
+  primaryQuestionOrProblem: string;
+  keyEntitiesAndConstraints: string[];
+  codeSnippet: string | null; // extracted text snippet only, never raw binary/image
+  tokenCount: number;
+}
+
+export interface DialogueTurn {
+  turnId: string;
+  sequenceNumber: number;
+  speaker: 'interviewer' | 'candidate';
+  text: string;
+  timestamp: string;
+  tokenCount: number;
+}
+
+export interface EstablishedFact {
+  factId: string;
+  category: 'architecture' | 'decision' | 'constraint' | 'candidate_fact';
+  fact: string;
+  establishedAt: string;
+}
+
+export interface ActiveDiscussionThread {
+  threadId: string;
+  parentTopic: string;
+  taskType: TaskType;
+  establishedDecisions: string[];
+  lastQuestion: string;
+  lastAnswerSummary?: string;
+  startedAt: string;
+  turnCount: number;
+}
+
+export interface CandidateFacts {
+  jobTitle: string;
+  company: string;
+  interviewRound: string;
+  experienceLevel: string;
+  focusNotes?: string;
+  keySkills: string[];
+  mode: 'PERSONALIZED' | 'GENERAL';
+}
+
+export interface CurrentContextSlot {
+  question: string | null;
+  userPrompt: string | null;
+  taskType: TaskType | null;
+  confidence: number | null;
+  latestScreenObservation: CompactScreenObservation | null;
+}
+
+export interface InterviewContext {
+  sessionId: string;
+  contextVersion: number;
+  lastSequenceNumber: number;
+  activeDiscussionThread: ActiveDiscussionThread | null;
+  current: CurrentContextSlot;
+  recentTurns: DialogueTurn[];
+  stableFacts: EstablishedFact[];
+  rollingSummary: string | null;
+  candidateFacts: CandidateFacts;
+}
+
+export type ContextEventType =
+  | 'SESSION_INITIALIZED'
+  | 'TRANSCRIPT_TURN_ADDED'
+  | 'SCREEN_OBSERVATION_RECORDED'
+  | 'MANUAL_QUESTION_SUBMITTED'
+  | 'AI_ANSWER_RECORDED'
+  | 'DISCUSSION_THREAD_UPDATED'
+  | 'FACT_ESTABLISHED'
+  | 'SESSION_DESTROYED';
+
+export interface ContextEvent {
+  eventId: string;
+  sequenceNumber: number;
+  requestId?: string;
+  timestamp: string;
+  contextVersion: number;
+  type: ContextEventType;
+  payload: any;
+}
+
+export interface BoundedContextPayload {
+  contextVersion: number;
+  estimatedTokens: number;
+  current: {
+    question: string | null;
+    userPrompt: string | null;
+    taskType: TaskType | null;
+  };
+  activeThread: {
+    parentTopic: string;
+    taskType: TaskType;
+    decisions: string[];
+  } | null;
+  screenObservation: {
+    problem: string;
+    entities: string[];
+    codeSnippet: string | null;
+  } | null;
+  recentTurns: Array<{ speaker: 'interviewer' | 'candidate'; text: string }>;
+  stableFacts: string[];
+  summary: string | null;
+  candidateProfile: {
+    role: string;
+    level: string;
+    skills: string[];
+    mode: 'PERSONALIZED' | 'GENERAL';
+  };
+}
+
 

@@ -123,3 +123,77 @@ export function loadTranscript(sessionId: string): TranscriptEntry[] | null {
   }
 }
 
+/**
+ * Detect whether an interviewer's speech segment is grammatically or semantically incomplete.
+ * Identifies trailing conjunctions, prepositions, auxiliary verbs, determiners, or open punctuation.
+ */
+const INCOMPLETE_TRAILING_WORDS = new Set([
+  // Conjunctions & relative pronouns
+  'and', 'or', 'but', 'nor', 'so', 'yet', 'if', 'when', 'where', 'while', 'because', 'although',
+  'though', 'that', 'which', 'who', 'whom', 'whose', 'whether', 'as', 'since', 'unless',
+  // Prepositions
+  'to', 'for', 'with', 'in', 'on', 'at', 'of', 'from', 'by', 'about', 'into', 'through',
+  'between', 'under', 'over', 'after', 'before', 'without', 'within', 'during', 'against',
+  'towards', 'upon', 'like', 'than',
+  // Auxiliary & linking verbs
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+  'would', 'could', 'should', 'will', 'can', 'may', 'might', 'must', 'shall',
+  // Determiners
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their', 'its'
+]);
+
+export function isSemanticallyIncomplete(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+
+  // Trailing open punctuation (e.g., comma, hyphen, colon, semicolon, ellipsis)
+  if (/[,:\-;–—\.\.]$/.test(trimmed) && !/[.?!]$/.test(trimmed)) {
+    return true;
+  }
+
+  // Tokenize words
+  const words = trimmed.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim().split(/\s+/);
+  if (words.length === 0) return true;
+
+  const lastWord = words[words.length - 1];
+  if (INCOMPLETE_TRAILING_WORDS.has(lastWord)) {
+    return true;
+  }
+
+  // Short incomplete question starters without predicate (1-3 words like "can you", "what is", "how do", "could you")
+  if (words.length <= 3 && /^(can|could|would|will|how|what|why|where|when|who|is|are|do|does|did)\s+(you|we|i|it|the|a|this)$/.test(words.join(' '))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Checks if newText appears to be an immediate continuation of previousText
+ * (e.g. speech recognition fragmented a sentence across two events).
+ */
+export function isContinuationOfPrevious(previousText: string, newText: string): boolean {
+  const prevTrimmed = previousText.trim();
+  const newTrimmed = newText.trim();
+  if (!prevTrimmed || !newTrimmed) return false;
+
+  // If previous was explicitly incomplete
+  if (isSemanticallyIncomplete(prevTrimmed)) return true;
+
+  // If newText starts with a lowercase letter (common in continuous STT streams)
+  if (/^[a-z]/.test(newTrimmed)) return true;
+
+  // If newText starts with a conjunction or continuation word
+  const firstWord = newTrimmed.toLowerCase().split(/\s+/)[0];
+  if (['and', 'or', 'but', 'so', 'because', 'with', 'using', 'like', 'for', 'to', 'in', 'also'].includes(firstWord)) {
+    return true;
+  }
+
+  // If previous text lacked terminal punctuation (.?!) and new text doesn't look like a completely new question
+  if (!/[.?!]$/.test(prevTrimmed)) {
+    return true;
+  }
+
+  return false;
+}
+

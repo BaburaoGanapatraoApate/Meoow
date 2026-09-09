@@ -23,8 +23,15 @@ router.use(deviceAuthMiddleware);
 const activeUserStreams = new Map<string, number>();
 export const MAX_CONCURRENT_STREAMS_PER_USER = 2;
 
+// Anti-loop guard: guarantee each request can only be continued once
+export const backendContinuedRequests = new Set<string>();
+
 const chatPayloadSchema = z.object({
   requestId: z.string().max(100).optional(),
+  isContinuation: z.boolean().optional(),
+  parentRequestId: z.string().max(100).optional(),
+  previousAnswer: z.string().max(50000).optional(),
+  maxTokens: z.number().min(1).max(8192).optional(),
   messages: z
     .array(
       z.object({
@@ -39,13 +46,14 @@ const chatPayloadSchema = z.object({
   sessionContext: z
     .object({
       sessionId: z.string().max(100).optional(),
+      session_id: z.string().max(100).optional(),
       jobTitle: z.string().max(200).optional(),
       job_title: z.string().max(200).optional(),
       company: z.string().max(200).optional(),
-      experienceLevel: z.string().max(100).optional(),
-      experience_level: z.string().max(100).optional(),
-      interviewRound: z.string().max(100).optional(),
-      interview_round: z.string().max(100).optional(),
+      experienceLevel: z.string().max(50).optional(),
+      experience_level: z.string().max(50).optional(),
+      interviewRound: z.string().max(50).optional(),
+      interview_round: z.string().max(50).optional(),
       streamingModel: z.string().max(100).optional(),
       streaming_model: z.string().max(100).optional(),
       notes: z.string().max(2000).optional(),
@@ -53,11 +61,25 @@ const chatPayloadSchema = z.object({
       resume_text: z.string().max(10000).optional(),
       language: z.string().max(50).optional(),
       source: z.string().max(50).optional(),
+      taskType: z.string().max(100).optional(),
+      parentTaskType: z.string().max(100).optional(),
+      taskConfidence: z.number().optional(),
+      taskTier: z.string().max(50).optional(),
+      suggestedDepth: z.enum(["SHORT", "NORMAL", "DEEP"]).optional(),
+      requiresCode: z.boolean().optional(),
+      boundedContext: z.any().optional(),
     })
     .optional(),
   imageBase64: z.string().max(3500000).optional(), // Max ~2.6MB JPEG
   question: z.string().max(10000).optional(),
   source: z.string().max(50).optional(),
+  taskType: z.string().max(100).optional(),
+  parentTaskType: z.string().max(100).optional(),
+  taskConfidence: z.number().optional(),
+  taskTier: z.string().max(50).optional(),
+  suggestedDepth: z.enum(["SHORT", "NORMAL", "DEEP"]).optional(),
+  requiresCode: z.boolean().optional(),
+  boundedContext: z.any().optional(),
 });
 
 /**
@@ -120,9 +142,31 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
 
   try {
     // 1. Atomically check and reserve credit (or verify unlimited mode)
-    reservation = await reserveCredit(userId, {
-      description: "AI answer generated",
-    });
+    // Continuation requests do NOT consume an additional credit.
+    if (!parsed.data.isContinuation) {
+      reservation = await reserveCredit(userId, {
+        description: "AI answer generated",
+      });
+    } else {
+      if (!parsed.data.parentRequestId) {
+        releaseConcurrencySlot();
+        res.status(400).json({
+          error: "INVALID_CONTINUATION",
+          message: "parentRequestId is required for continuation.",
+        });
+        return;
+      }
+      if (backendContinuedRequests.has(parsed.data.parentRequestId)) {
+        releaseConcurrencySlot();
+        res.status(400).json({
+          error: "ALREADY_CONTINUED",
+          message: "A continuation has already been executed for this request.",
+        });
+        return;
+      }
+      backendContinuedRequests.add(parsed.data.parentRequestId);
+      reservation = null;
+    }
 
     // 2. Set up SSE Streaming Headers
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -156,6 +200,8 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
     sendSSE({
       type: "start",
       requestId: reqId,
+      parentRequestId: parsed.data.parentRequestId,
+      isContinuation: parsed.data.isContinuation || false,
       source,
     });
 
@@ -166,9 +212,21 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
     let result: {
       fullAnswer: string;
       modelUsed: string;
+      finishReason?: string;
+      isComplete?: boolean;
       isError?: boolean;
       errorCode?: string;
       retryAfterSeconds?: number;
+    };
+
+    const taskMetadata = {
+      taskType: parsed.data.taskType || sessionContext?.taskType,
+      parentTaskType: parsed.data.parentTaskType || sessionContext?.parentTaskType,
+      confidence: parsed.data.taskConfidence ?? sessionContext?.taskConfidence,
+      tier: parsed.data.taskTier || sessionContext?.taskTier,
+      suggestedDepth: parsed.data.suggestedDepth || sessionContext?.suggestedDepth,
+      requiresCode: parsed.data.requiresCode ?? sessionContext?.requiresCode,
+      boundedContext: parsed.data.boundedContext || sessionContext?.boundedContext,
     };
 
     if (imageBase64) {
@@ -179,6 +237,7 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
           model,
           apiKey: groqApiKey,
           sessionContext,
+          taskMetadata,
           signal: abortController.signal,
           requestId: reqId,
           activeStreamsCount: activeUserStreams.get(userId) || 1,
@@ -209,7 +268,10 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
           model,
           apiKey: groqApiKey,
           sessionContext,
+          taskMetadata,
           signal: abortController.signal,
+          requestId: reqId,
+          maxTokens: parsed.data.maxTokens,
         },
         (chunkText) => {
           sendSSE({
@@ -236,13 +298,17 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
     sendSSE({
       type: "done",
       requestId: reqId,
+      parentRequestId: parsed.data.parentRequestId,
       answer: result.fullAnswer,
       timestamp: new Date().toISOString(),
       source,
       model: result.modelUsed,
+      finishReason: result.finishReason || (result.isError ? "error" : "stop"),
+      isComplete: result.isComplete ?? (result.finishReason === "stop"),
       isError: result.isError,
       errorCode: result.errorCode,
       retryAfterSeconds: result.retryAfterSeconds,
+      qualityGate: (result as any).qualityGate,
     });
 
     releaseConcurrencySlot();

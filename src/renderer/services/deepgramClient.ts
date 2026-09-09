@@ -3,7 +3,7 @@
  * Connects securely to the Meoow backend WebSocket gateway at /ws/deepgram.
  */
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000').replace(/\/+$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://api.meooow.tech').replace(/\/+$/, '');
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 
 export interface DeepgramConfig {
@@ -15,6 +15,7 @@ export interface DeepgramConfig {
   vad_events?: boolean;
   multichannel?: boolean;
   channels?: number;
+  utterance_end_ms?: number;
 }
 
 export const DEFAULT_DEEPGRAM_CONFIG: DeepgramConfig = {
@@ -26,6 +27,7 @@ export const DEFAULT_DEEPGRAM_CONFIG: DeepgramConfig = {
   vad_events: true,
   multichannel: true,
   channels: 2,
+  utterance_end_ms: 1000,
 };
 
 const MAX_RECONNECT_ATTEMPTS = 999;

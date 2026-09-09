@@ -28,7 +28,7 @@ export interface DeviceListResponse {
   activeCount: number;
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000').replace(/\/+$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://api.meooow.tech').replace(/\/+$/, '');
 
 async function handleResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type');

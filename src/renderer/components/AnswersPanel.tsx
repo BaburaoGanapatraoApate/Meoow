@@ -115,7 +115,7 @@ export const AnswersPanel: React.FC<AnswersPanelProps> = ({
             {answers.map((ans, idx) => (
               <div key={ans.requestId || ans.timestamp || idx} className="answer-item">
                 <div className="answer-item-label">
-                  {ans.source === 'screen' ? 'Screen Analysis' : ans.source === 'manual' ? 'Manual Question' : 'Interview Answer'}
+                  {ans.source === 'screen' || ans.source === 'screen_capture' ? 'Screen Analysis' : ans.source === 'manual' ? 'Manual Question' : 'Interview Answer'}
                   {ans.timestamp && ` • ${new Date(ans.timestamp).toLocaleTimeString()}`}
                 </div>
                 {ans.timestamp && answerScreenshots[ans.timestamp] && (

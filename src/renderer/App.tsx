@@ -16,6 +16,8 @@ import {
   archiveSession,
   saveFeedback,
 } from './services/sessionManager';
+import { interviewContextManager } from './services/interviewContextManager';
+import { classifyInterviewTask } from './services/taskClassifier';
 import { setupClickThrough } from './utils/clickThrough';
 import {
   isFillerOnlyTranscript,
@@ -23,6 +25,8 @@ import {
   findDuplicates,
   isCrossTalkDuplicate,
   saveTranscript,
+  isSemanticallyIncomplete,
+  isContinuationOfPrevious,
 } from './utils/transcriptProcessor';
 import { createAudioMerger } from './utils/audioMerger';
 import type {
@@ -35,13 +39,20 @@ import type {
   AnswerScreenshots,
 } from './types';
 
-// ── Constants (optimized for instant ~1s human turnaround) ──
+// ── Constants (optimized for conversational turn-taking & human speech cadence) ──
 const AUDIO_FIRST_DATA_TIMEOUT = 15_000;
-const UTTERANCE_END_MS = 400;
-const QUESTION_DEBOUNCE_MS = 600;
-const UTTERANCE_END_DELAY = 100;
+const CONTINUATION_GRACE_MS = 1400; // 1.4s grace period covering natural 1.0-1.2s human thought pauses
+const INCOMPLETE_HOLD_EXTEND_MS = 800; // Hold extension step when trailing clause is semantically incomplete
+const MAX_INCOMPLETE_HOLD_MS = 3500; // Safety cutoff preventing indefinite holding of broken speech
 const FINALIZE_TIMEOUT = 800;
 const FINALIZE_DRAIN = 100;
+
+interface ActiveStreamSession {
+  requestId: string;
+  source: string;
+  accumulatedText: string;
+  screenshotUrl?: string | null;
+}
 
 // ── Inner app component (uses toast context) ──
 function MeowApp() {
@@ -88,8 +99,34 @@ function MeowApp() {
   const [mergedStream, setMergedStream] = useState<MediaStream | null>(null);
   const [isProtectionSupported, setIsProtectionSupported] = useState(true);
   const [isDeepgramConnected, setIsDeepgramConnected] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeCooldown, setAnalyzeCooldown] = useState(0);
 
   // ── Refs ──
+  const isAnalyzingScreenRef = useRef(false);
+  const analyzeCooldownRef = useRef(0);
+  const activeStreamsRef = useRef<Map<string, ActiveStreamSession>>(new Map());
+
+  // Sync cooldown ref & run 1s countdown ticker
+  useEffect(() => {
+    analyzeCooldownRef.current = analyzeCooldown;
+  }, [analyzeCooldown]);
+
+  useEffect(() => {
+    if (analyzeCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setAnalyzeCooldown(prev => {
+        const next = prev - 1;
+        analyzeCooldownRef.current = Math.max(0, next);
+        return Math.max(0, next);
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [analyzeCooldown]);
+  const foregroundStreamIdRef = useRef<string | null>(null);
+  const currentStreamingScreenshotRef = useRef<string | null>(null);
+  const lastFlushedQuestionRef = useRef<{ text: string; timestamp: number; requestId?: string } | null>(null);
+  const questionStartTimeRef = useRef<number>(0);
   const screenshotUrlsRef = useRef<Set<string>>(new Set());
   const deepgramManagerRef = useRef<ReturnType<typeof createDeepgramManager> | null>(null);
   const pendingAudioChunksRef = useRef<Blob[]>([]);
@@ -199,6 +236,9 @@ function MeowApp() {
         next.push(entry);
       }
       transcriptRef.current = next;
+      if (isFinal && speaker === 'user') {
+        interviewContextManager.addCandidateTurn(trimmed);
+      }
       return next;
     });
   }, []);
@@ -209,15 +249,48 @@ function MeowApp() {
       clearTimeout(questionDebounceRef.current);
       questionDebounceRef.current = null;
     }
-    const text = questionBuffer.current.trim();
-    questionBuffer.current = '';
-    if (!text || isFillerOnlyTranscript(text)) return;
 
-    const signature = buildQuestionSignature(text);
+    const text = questionBuffer.current.trim();
+    if (!text || isFillerOnlyTranscript(text)) {
+      questionBuffer.current = '';
+      questionStartTimeRef.current = 0;
+      return;
+    }
+
+    const now = Date.now();
+    const durationHeld = questionStartTimeRef.current ? now - questionStartTimeRef.current : 0;
+    // If the sentence is semantically incomplete (e.g. ends in "and", "or", "for", "with", "a", comma),
+    // hold for up to MAX_INCOMPLETE_HOLD_MS to let the interviewer finish formulating the question
+    if (isSemanticallyIncomplete(text) && durationHeld < MAX_INCOMPLETE_HOLD_MS) {
+      questionDebounceRef.current = setTimeout(flushQuestion, INCOMPLETE_HOLD_EXTEND_MS);
+      return;
+    }
+
+    questionBuffer.current = '';
+    questionStartTimeRef.current = 0;
+
+    // Check if this segment is a continuation of a recently flushed incomplete question
+    let questionToAnswer = text;
+    const lastFlushed = lastFlushedQuestionRef.current;
+    const isContinuation =
+      lastFlushed &&
+      now - lastFlushed.timestamp < 4500 &&
+      isContinuationOfPrevious(lastFlushed.text, text);
+
+    if (isContinuation && lastFlushed) {
+      // Merge with previous segment
+      questionToAnswer = `${lastFlushed.text} ${text}`.replace(/\s+/g, ' ').trim();
+      // Cancel premature stream if still active
+      if (lastFlushed.requestId && groqClientRef.current) {
+        groqClientRef.current.cancelStream(lastFlushed.requestId);
+      }
+    }
+
+    const signature = buildQuestionSignature(questionToAnswer);
     if (signature === lastQuestionSignatureRef.current) return;
     lastQuestionSignatureRef.current = signature;
 
-    recentQuestionsRef.current.push({ text, createdAt: Date.now() });
+    recentQuestionsRef.current.push({ text: questionToAnswer, createdAt: now });
     if (recentQuestionsRef.current.length > 4) recentQuestionsRef.current.shift();
 
     // Build context from recent transcript
@@ -227,10 +300,42 @@ function MeowApp() {
       .map(e => `${e.speaker === 'user' ? 'Candidate' : 'Interviewer'}: ${e.text}`)
       .join('\n');
 
-    const fullContext = recentTranscript ? `${recentTranscript}\n\nInterviewer's question: ${text}` : text;
+    const fullContext = recentTranscript
+      ? `${recentTranscript}\n\nInterviewer's question: ${questionToAnswer}`
+      : questionToAnswer;
+
+    // Classify task with bounded context
+    const contextSnapshot = interviewContextManager.getSnapshot();
+    const classification = classifyInterviewTask(questionToAnswer, {
+      activeDiscussionThread: contextSnapshot.activeDiscussionThread,
+      latestScreenObservation: contextSnapshot.current.latestScreenObservation,
+      recentTurns: contextSnapshot.recentTurns,
+      interviewRound: sessionData?.interview_round,
+      candidateProfile: contextSnapshot.candidateFacts,
+    });
+
+    interviewContextManager.addInterviewerTurn(questionToAnswer);
+    const boundedContext = interviewContextManager.buildBoundedContextPayload();
 
     if (autoAnswerRef.current && groqClientRef.current) {
-      groqClientRef.current.sendTranscript(fullContext, true, 'auto', selectedLanguage);
+      const reqId = groqClientRef.current.sendTranscript(
+        fullContext,
+        true,
+        'auto',
+        selectedLanguage,
+        classification,
+        boundedContext
+      );
+      lastFlushedQuestionRef.current = {
+        text: questionToAnswer,
+        timestamp: now,
+        requestId: reqId || undefined,
+      };
+    } else {
+      lastFlushedQuestionRef.current = {
+        text: questionToAnswer,
+        timestamp: now,
+      };
     }
   }, [selectedLanguage]);
 
@@ -262,11 +367,10 @@ function MeowApp() {
           } else if (event.type === 'UtteranceEnd') {
             const buf = questionBuffer.current.trim();
             if (!buf) return;
-            // If punctuation present, trigger flush immediately; else short delay
-            if (/[?.!]$/.test(buf)) {
-              flushQuestion();
-            } else {
-              scheduleQuestionFlush(UTTERANCE_END_DELAY);
+            // UtteranceEnd confirms silence gap: ensure continuation grace timer is running,
+            // but NEVER flush prematurely at 400ms!
+            if (!questionDebounceRef.current) {
+              scheduleQuestionFlush(CONTINUATION_GRACE_MS);
             }
           } else if (event.type === 'Results') {
             const ch = event.channel_index?.[0] ?? 0;
@@ -280,15 +384,18 @@ function MeowApp() {
             handleTranscriptResult(speaker, text, isFinal);
 
             if (speaker === 'interviewer') {
+              if (!questionStartTimeRef.current) {
+                questionStartTimeRef.current = Date.now();
+              }
               if (isFinal) {
                 questionBuffer.current = (questionBuffer.current + ' ' + text).trim();
               }
-              const currentQ = questionBuffer.current.trim();
-              if (speechFinal && /[?.!]$/.test(currentQ)) {
-                flushQuestion();
-              } else {
-                scheduleQuestionFlush(QUESTION_DEBOUNCE_MS);
-              }
+
+              // Consistent continuation-grace strategy:
+              // Whenever interviewer speech arrives, reset the continuation grace window.
+              // This protects against natural 1.0-1.2s human pauses between clauses
+              // without introducing unnecessary 3.5s delays for complete questions.
+              scheduleQuestionFlush(CONTINUATION_GRACE_MS);
             }
 
             if (event.from_finalize && finalizeCallbackRef.current) {
@@ -392,7 +499,13 @@ function MeowApp() {
   // ── Analyze screen shortcut ──
   useEffect(() => {
     const cleanup = window.meow?.onAnalyzeScreenShortcut?.(() => {
-      if (isSessionStarted) analyzeScreen();
+      if (isSessionStarted) {
+        if (analyzeCooldownRef.current > 0) {
+          toast.info(`Screen analysis is rate-limited. Please wait ~${analyzeCooldownRef.current}s.`);
+          return;
+        }
+        analyzeScreen();
+      }
     });
     return () => cleanup?.();
   }, [isSessionStarted]);
@@ -534,6 +647,16 @@ function MeowApp() {
       setSessionData(session);
       setResumeText(formData.resume_file_path || '');
 
+      interviewContextManager.initSession({
+        sessionId: session.id,
+        job_title: formData.job_title,
+        company: formData.company,
+        interview_round: formData.interview_round,
+        experience_level: formData.experience_level,
+        notes: formData.notes,
+        resume_text: formData.resume_text || (session as any).resume_text || '',
+      });
+
       const sessionContext: SessionContext = {
         sessionId: session.id,
         jobTitle: formData.job_title,
@@ -548,30 +671,96 @@ function MeowApp() {
 
       const client = new GroqClient(
         {
-          onAnswerStart: ({ requestId }) => {
+          onAnswerStart: ({ source, requestId }) => {
             setPendingCopilotWork(n => n + 1);
-            streamingAnswerRef.current = '';
+
+            const isScreen = source === 'screen' || source === 'screen_capture';
+            const screenshotUrl = isScreen ? currentStreamingScreenshotRef.current : null;
+
+            // Register this stream session independently
+            activeStreamsRef.current.set(requestId, {
+              requestId,
+              source,
+              accumulatedText: '',
+              screenshotUrl,
+            });
+
+            // Screen analysis ALWAYS takes foreground (deliberate user action).
+            // Normal interview / manual stream takes foreground only if no screen analysis is actively foregrounded.
+            const shouldBeForeground = isScreen || !isAnalyzingScreenRef.current;
+
+            if (shouldBeForeground) {
+              foregroundStreamIdRef.current = requestId;
+              streamingAnswerRef.current = '';
+              setCurrentStreamingAnswer('');
+              if (!isScreen) {
+                setCurrentStreamingScreenshot(null);
+                currentStreamingScreenshotRef.current = null;
+              }
+            }
           },
-          onAnswerChunk: ({ chunk }) => {
-            streamingAnswerRef.current += chunk;
-            setCurrentStreamingAnswer(streamingAnswerRef.current);
+          onAnswerChunk: ({ chunk, requestId }) => {
+            const stream = activeStreamsRef.current.get(requestId);
+            if (stream) {
+              stream.accumulatedText += chunk;
+            }
+
+            // Only update foreground streaming UI if chunk belongs to the foreground stream
+            if (requestId === foregroundStreamIdRef.current) {
+              streamingAnswerRef.current = stream ? stream.accumulatedText : (streamingAnswerRef.current + chunk);
+              setCurrentStreamingAnswer(streamingAnswerRef.current);
+            }
           },
           onAnswer: (answer) => {
             setPendingCopilotWork(n => Math.max(0, n - 1));
-            const finalAnswerText = answer.answer || streamingAnswerRef.current;
-            const finalAnswer: Answer = {
-              ...answer,
-              answer: finalAnswerText,
-            };
-            setAnswers(prev => {
-              const next = [finalAnswer, ...prev];
-              answersRef.current = next;
-              saveAnswers(next);
-              return next;
-            });
-            setCurrentStreamingAnswer('');
-            setCurrentStreamingScreenshot(null);
-            streamingAnswerRef.current = '';
+
+            const stream = answer.requestId ? activeStreamsRef.current.get(answer.requestId) : undefined;
+            const finalAnswerText = answer.answer || stream?.accumulatedText || (answer.requestId === foregroundStreamIdRef.current ? streamingAnswerRef.current : '');
+
+            // ALWAYS commit completed answer to history, whether it was foreground or background
+            if (finalAnswerText) {
+              interviewContextManager.recordAiAnswer(finalAnswerText);
+              const finalAnswer: Answer = {
+                ...answer,
+                answer: finalAnswerText,
+              };
+              setAnswers(prev => {
+                const next = [finalAnswer, ...prev];
+                answersRef.current = next;
+                saveAnswers(next);
+                return next;
+              });
+            }
+
+            // If this was the foreground stream, clear the streaming UI card
+            if (answer.requestId === foregroundStreamIdRef.current) {
+              setCurrentStreamingAnswer('');
+              setCurrentStreamingScreenshot(null);
+              streamingAnswerRef.current = '';
+              foregroundStreamIdRef.current = null;
+              currentStreamingScreenshotRef.current = null;
+            }
+
+            if (answer.errorCode === 'RATE_LIMIT_EXCEEDED' && answer.retryAfterSeconds) {
+              const seconds = Math.max(1, Math.ceil(answer.retryAfterSeconds));
+              setAnalyzeCooldown(seconds);
+              analyzeCooldownRef.current = seconds;
+            }
+
+            if (
+              answer.source === 'screen' ||
+              answer.source === 'screen_capture' ||
+              stream?.source === 'screen' ||
+              stream?.source === 'screen_capture'
+            ) {
+              isAnalyzingScreenRef.current = false;
+              setIsAnalyzing(false);
+            }
+
+            if (answer.requestId) {
+              activeStreamsRef.current.delete(answer.requestId);
+            }
+
             refreshUser?.().catch?.(() => {});
           },
           onError: (err) => {
@@ -579,9 +768,35 @@ function MeowApp() {
             if (err.code === 'INSUFFICIENT_CREDITS') {
               refreshUser?.().catch?.(() => {});
             }
-            toast.error(err.message || 'AI generation failed');
-            setCurrentStreamingAnswer('');
-            streamingAnswerRef.current = '';
+
+            if (err.code === 'RATE_LIMIT_EXCEEDED') {
+              setAnalyzeCooldown(20);
+              analyzeCooldownRef.current = 20;
+            }
+
+            // If error was on the foreground stream, clear UI and show toast
+            if (!err.requestId || err.requestId === foregroundStreamIdRef.current) {
+              toast.error(err.message || 'AI generation failed');
+              setCurrentStreamingAnswer('');
+              setCurrentStreamingScreenshot(null);
+              streamingAnswerRef.current = '';
+              foregroundStreamIdRef.current = null;
+              currentStreamingScreenshotRef.current = null;
+            }
+
+            const stream = err.requestId ? activeStreamsRef.current.get(err.requestId) : undefined;
+            if (
+              !err.requestId ||
+              stream?.source === 'screen' ||
+              stream?.source === 'screen_capture'
+            ) {
+              isAnalyzingScreenRef.current = false;
+              setIsAnalyzing(false);
+            }
+
+            if (err.requestId) {
+              activeStreamsRef.current.delete(err.requestId);
+            }
           },
         },
         sessionContext,
@@ -647,6 +862,7 @@ function MeowApp() {
       setIsDeepgramConnected(false);
       setIsSessionStarted(false);
       setZeroCreditCountdown(null);
+      interviewContextManager.destroySession();
       setTranscript([]);
       transcriptRef.current = [];
       setAnswers([]);
@@ -657,6 +873,14 @@ function MeowApp() {
       setPendingCopilotWork(0);
       setCurrentStreamingAnswer('');
       setCurrentStreamingScreenshot(null);
+      isAnalyzingScreenRef.current = false;
+      setIsAnalyzing(false);
+      foregroundStreamIdRef.current = null;
+      currentStreamingScreenshotRef.current = null;
+      activeStreamsRef.current.clear();
+      lastFlushedQuestionRef.current = null;
+      questionBuffer.current = '';
+      questionStartTimeRef.current = 0;
       clearSessionData();
       try {
         await refreshUser?.();
@@ -669,18 +893,32 @@ function MeowApp() {
 
   // ── Analyze screen ──
   const analyzeScreen = async () => {
+    if (isAnalyzingScreenRef.current || analyzeCooldownRef.current > 0) {
+      if (analyzeCooldownRef.current > 0) {
+        toast.info(`Screen analysis is rate-limited. Please wait ~${analyzeCooldownRef.current}s.`);
+      }
+      return;
+    }
+
     const client = groqClientRef.current || groqClient;
     if (!client) {
       toast.error('AI assistant is not ready yet');
       return;
     }
+
+    setIsAnalyzing(true);
+    isAnalyzingScreenRef.current = true;
     toast.info('Capturing screen for analysis...');
+
+    let stream: MediaStream | null = null;
+    let video: HTMLVideoElement | null = null;
+
     try {
       const sources = await window.meow?.getScreenSources?.();
       const source = sources?.find((s: any) => s.isPrimary || s.id?.startsWith('screen:')) || sources?.[0];
       if (!source) throw new Error('No screen source found');
 
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           mandatory: {
@@ -690,47 +928,115 @@ function MeowApp() {
         } as any,
       });
 
-      const video = document.createElement('video');
+      video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
       video.srcObject = stream;
       await video.play();
 
+      let targetWidth = video.videoWidth || 1920;
+      let targetHeight = video.videoHeight || 1080;
+      const MAX_WIDTH = 1920;
+      const MAX_HEIGHT = 1080;
+
+      if (targetWidth > MAX_WIDTH || targetHeight > MAX_HEIGHT) {
+        const ratio = Math.min(MAX_WIDTH / targetWidth, MAX_HEIGHT / targetHeight);
+        targetWidth = Math.round(targetWidth * ratio);
+        targetHeight = Math.round(targetHeight * ratio);
+      }
+
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
-      ctx?.drawImage(video, 0, 0);
-      stream.getTracks().forEach(t => t.stop());
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+      }
 
       const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.8));
       if (!blob || blob.size > 4 * 1024 * 1024) throw new Error('Screenshot too large or failed');
 
+      console.log(`[ScreenCapture] Captured JPEG: ${targetWidth}x${targetHeight}, ${(blob.size / 1024).toFixed(1)} KB`);
+
+      // Revoke older object URLs to prevent Chromium memory leaks
+      screenshotUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      screenshotUrlsRef.current.clear();
+
       const url = URL.createObjectURL(blob);
       screenshotUrlsRef.current.add(url);
       setCurrentStreamingScreenshot(url);
+      currentStreamingScreenshotRef.current = url;
 
       const requestId = await client.sendScreenCapture(blob);
       if (requestId) {
         setAnswerScreenshots(prev => ({ ...prev, [new Date().toISOString()]: url }));
+      } else {
+        setIsAnalyzing(false);
+        isAnalyzingScreenRef.current = false;
       }
     } catch (err: any) {
+      setIsAnalyzing(false);
+      isAnalyzingScreenRef.current = false;
       toast.error('Screen analysis failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      // Explicitly detach and unload HTMLVideoElement to release Chromium Direct3D11 / MediaFoundation decoders
+      if (video) {
+        try {
+          video.pause();
+          video.srcObject = null;
+          video.load();
+          video.remove();
+        } catch {}
+      }
+      if (stream) {
+        try {
+          stream.getTracks().forEach(t => t.stop());
+        } catch {}
+      }
     }
   };
 
   // ── Manual question ──
   const onSubmitQuestion = (question: string) => {
-    groqClient?.sendManualQuestion(question, selectedLanguage);
+    const client = groqClientRef.current || groqClient;
+    if (!client) return;
+
+    const contextSnapshot = interviewContextManager.getSnapshot();
+    const classification = classifyInterviewTask(question, {
+      activeDiscussionThread: contextSnapshot.activeDiscussionThread,
+      latestScreenObservation: contextSnapshot.current.latestScreenObservation,
+      recentTurns: contextSnapshot.recentTurns,
+      interviewRound: sessionData?.interview_round,
+      candidateProfile: contextSnapshot.candidateFacts,
+    });
+
+    interviewContextManager.setManualQuestion(question, classification.taskType);
+    const boundedContext = interviewContextManager.buildBoundedContextPayload();
+
+    client.sendManualQuestion(question, selectedLanguage, classification, boundedContext);
   };
 
   // ── Generate answer (manual trigger when auto-answer off) ──
   const generateAnswer = () => {
+    const client = groqClientRef.current || groqClient;
     const recent = transcriptRef.current
       .filter(e => e.is_final && e.speaker === 'interviewer')
       .slice(-3)
       .map(e => e.text)
       .join(' ');
-    if (recent && groqClient) {
-      groqClient.sendTranscript(recent, false, 'manual', selectedLanguage);
+    if (recent && client) {
+      const contextSnapshot = interviewContextManager.getSnapshot();
+      const classification = classifyInterviewTask(recent, {
+        activeDiscussionThread: contextSnapshot.activeDiscussionThread,
+        latestScreenObservation: contextSnapshot.current.latestScreenObservation,
+        recentTurns: contextSnapshot.recentTurns,
+        interviewRound: sessionData?.interview_round,
+        candidateProfile: contextSnapshot.candidateFacts,
+      });
+      const boundedContext = interviewContextManager.buildBoundedContextPayload();
+      client.sendTranscript(recent, false, 'manual', selectedLanguage, classification, boundedContext);
     }
   };
 
@@ -876,6 +1182,8 @@ function MeowApp() {
         onReconnectCopilot={() => {}}
         onEnd={endSession}
         onAnalyzeScreen={analyzeScreen}
+        isAnalyzing={isAnalyzing}
+        analyzeCooldown={analyzeCooldown}
         isMicEnabled={isMicEnabled}
         onToggleMic={toggleMic}
         isPurchaseModalOpen={isPurchaseModalOpen}

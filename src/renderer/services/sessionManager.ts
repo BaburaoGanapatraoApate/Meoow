@@ -90,21 +90,33 @@ export function clearSessionData(): void {
 }
 
 /**
- * Archive a completed session to localStorage for persistence across reloads.
+ * Archive a completed session's non-sensitive metadata for session counting/history.
+ * Strictly ephemeral interview content: transcripts, answers, screen observations,
+ * rolling summaries, and resume text are NEVER stored in localStorage.
  */
 export function archiveSession(
   session: SessionData,
-  transcript: TranscriptEntry[],
-  answers: Answer[]
+  _transcript?: TranscriptEntry[],
+  _answers?: Answer[]
 ): void {
   try {
     const key = `meow-session-archive-${session.id}`;
+    const nonSensitiveMetadata = {
+      id: session.id,
+      job_title: session.job_title,
+      company: session.company,
+      interview_type: session.interview_type,
+      interview_round: session.interview_round,
+      experience_level: session.experience_level,
+      started_at: session.started_at,
+      ended_at: new Date().toISOString(),
+      resolved_model: session.resolved_model,
+      status: 'completed',
+    };
     localStorage.setItem(
       key,
       JSON.stringify({
-        session,
-        transcript,
-        answers,
+        session: nonSensitiveMetadata,
         ended_at: new Date().toISOString(),
       })
     );

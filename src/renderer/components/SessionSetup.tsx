@@ -16,8 +16,8 @@ const INTERVIEW_ROUNDS = [
 
 const GROQ_MODELS = [
   { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B', fast: true },
-  { id: 'openai/gpt-oss-20b', name: 'GPT OSS 20B', fast: true },
   { id: 'openai/gpt-oss-120b', name: 'GPT OSS 120B', fast: false },
+  { id: 'openai/gpt-oss-20b', name: 'GPT OSS 20B', fast: true },
   { id: 'groq/compound-mini', name: 'Compound Mini', fast: true },
   { id: 'groq/compound', name: 'Compound', fast: false },
 ];

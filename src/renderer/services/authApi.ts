@@ -34,7 +34,7 @@ export interface ApiError {
   code?: string;
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000').replace(/\/+$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://api.meooow.tech').replace(/\/+$/, '');
 
 async function handleResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type');
@@ -54,6 +54,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const errorMessage =
       (isJson && data?.error) ||
+      (isJson && (data?.message || data?.error)) ||
       (typeof data === 'string' && data) ||
       `Request failed with status ${response.status}`;
 

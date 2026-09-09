@@ -1,21 +1,19 @@
 import Groq from "groq-sdk";
 import dotenv from "dotenv";
+import { verifyAnswerQuality, QualityCheckResult } from "./qualityGate";
 
 dotenv.config();
 
 export const ALLOWED_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "llama-3.1-70b-versatile",
   "qwen/qwen3.8-27b",
-  "openai/gpt-oss-20b",
   "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
   "groq/compound-mini",
   "groq/compound"
 ];
 
-export const DEFAULT_MODEL = "llama-3.3-70b-versatile";
-export const FALLBACK_MODEL = "qwen/qwen3.8-27b";
+export const DEFAULT_MODEL = "qwen/qwen3.8-27b";
+export const FALLBACK_MODEL = "openai/gpt-oss-120b";
 
 export const DEFAULT_VISION_MODEL = "qwen/qwen3.6-27b";
 export const FALLBACK_VISION_MODEL = "qwen/qwen3.8-27b";
@@ -23,6 +21,17 @@ export const ALLOWED_VISION_MODELS = [
   "qwen/qwen3.6-27b",
   "qwen/qwen3.8-27b",
 ];
+
+export interface TaskMetadata {
+  taskType?: string;
+  parentTaskType?: string;
+  confidence?: number;
+  tier?: string;
+  rationale?: string;
+  suggestedDepth?: 'SHORT' | 'NORMAL' | 'DEEP';
+  requiresCode?: boolean;
+  boundedContext?: any;
+}
 
 export interface SessionContextData {
   sessionId?: string;
@@ -42,6 +51,14 @@ export interface SessionContextData {
   resume_text?: string;
   language?: string;
   source?: string;
+  taskType?: string;
+  parentTaskType?: string;
+  taskConfidence?: number;
+  taskTier?: string;
+  suggestedDepth?: 'SHORT' | 'NORMAL' | 'DEEP';
+  requiresCode?: boolean;
+  boundedContext?: any;
+  taskMetadata?: TaskMetadata;
 }
 
 export interface ChatStreamOptions {
@@ -49,8 +66,21 @@ export interface ChatStreamOptions {
   model?: string;
   apiKey?: string;
   sessionContext?: SessionContextData;
+  taskMetadata?: TaskMetadata;
   signal?: AbortSignal;
   onChunk?: (chunkText: string) => void;
+  requestId?: string;
+  maxTokens?: number;
+}
+
+export interface ChatStreamResult {
+  fullAnswer: string;
+  modelUsed: string;
+  finishReason: "stop" | "length" | "abort" | "error" | "unknown";
+  isComplete: boolean;
+  chunkCount: number;
+  durationMs: number;
+  qualityGate?: QualityCheckResult;
 }
 
 export interface ScreenAnalysisOptions {
@@ -59,6 +89,7 @@ export interface ScreenAnalysisOptions {
   model?: string;
   apiKey?: string;
   sessionContext?: SessionContextData;
+  taskMetadata?: TaskMetadata;
   signal?: AbortSignal;
   onChunk?: (chunkText: string) => void;
   requestId?: string;
@@ -68,9 +99,213 @@ export interface ScreenAnalysisOptions {
 export interface ScreenAnalysisResult {
   fullAnswer: string;
   modelUsed: string;
+  finishReason?: "stop" | "length" | "abort" | "error" | "unknown" | string;
+  isComplete?: boolean;
   isError?: boolean;
   errorCode?: string;
   retryAfterSeconds?: number;
+  chunkCount?: number;
+  durationMs?: number;
+}
+
+
+
+/**
+ * Return specific interview answer strategy instructions for a given task type.
+ */
+/**
+ * Return specific interview answer strategy instructions for a given task type.
+ */
+export function getTaskStrategyInstructions(
+  taskType?: string,
+  parentTaskType?: string,
+  requiresCode?: boolean,
+  options?: {
+    hasCandidateExperience?: boolean;
+    hasCompanyContext?: boolean;
+  }
+): string {
+  const effectiveType = taskType === "FOLLOW_UP" && parentTaskType ? parentTaskType : taskType;
+
+  switch (effectiveType) {
+    case "CODING":
+      return `TASK STRATEGY — CODING INTERVIEW:
+1. SPOKEN APPROACH FIRST: In the first 1-2 sentences, verbally state your algorithmic approach, chosen data structure, and why ("I'd solve this using a two-pointer approach with a hash map to achieve linear time...").
+2. IMPLEMENTATION: Write clean, optimal, production-ready code with concise inline comments.
+3. COMPLEXITY: State exact Big-O Time Complexity and Space Complexity.
+4. EDGE CASES: State 2-3 specific edge cases your solution accounts for (e.g., empty collection, duplicates, boundary limits).
+5. NEVER solve a different problem. Keep the verbal explanation crisp.`;
+
+    case "SQL":
+      return `TASK STRATEGY — SQL QUERY:
+1. DIRECT QUERY FIRST: Provide the clean, formatted SQL query immediately.
+2. SPOKEN LOGIC: In 1-3 conversational sentences, explain the query logic (e.g., why a window function like DENSE_RANK() or CTE was chosen, join logic, aggregations).
+3. PERFORMANCE & INDEXING: Mention index considerations or query performance tradeoffs when relevant.`;
+
+    case "DEBUGGING":
+      return `TASK STRATEGY — DEBUGGING & ROOT CAUSE:
+1. DIRECT ROOT CAUSE FIRST: Sentence 1 must state the exact root cause of the bug or exception directly ("The root cause is an off-by-one indexing error where...").
+2. EVIDENCE & REASONING: Explain why the error occurs in 1-2 sentences.
+3. EXACT CODE FIX: Show the corrected line(s) or snippet.
+4. DEFENSIVE PREVENTION: In 1 sentence, explain how to defensively prevent this in production (e.g., input validation, bounds check, type narrowing).`;
+
+    case "CONCEPTUAL":
+    case "THEORETICAL_CONCEPT":
+      return `TASK STRATEGY — CONCEPTUAL & THEORETICAL:
+1. DIRECT DEFINITION FIRST: Sentence 1 must directly define the concept or answer the core question ("The key difference is that X operates at layer Y whereas Z...").
+2. UNDER THE HOOD MECHANISM: In 1-2 sentences, explain how it works internally (memory layout, execution model, protocol).
+3. PRACTICAL EXAMPLE / TRADE-OFF: Give a real-world scenario or concrete engineering trade-off where you would choose one over the other.
+4. DYNAMIC DEPTH: Keep it tight (~20-40 seconds spoken, 3-5 sentences total). STRICTLY NO CODE unless explicitly requested.`;
+
+    case "ML_DESIGN":
+      return `TASK STRATEGY — MACHINE LEARNING SYSTEM DESIGN:
+1. PROBLEM FORMULATION & TARGET: Sentence 1 states the mathematical formulation (e.g., regression vs ranking, point estimate vs quantile loss) and business objective.
+2. DATA & FEATURE ENGINEERING: Outline key features (spatial, temporal, categorical embeddings, real-time streaming vs batch features) and explicitly state how you prevent data leakage (time-based train/test splits).
+3. MODEL SELECTION & RATIONALE: State baseline model (e.g., historical average or logistic regression) and primary chosen model (e.g., LightGBM/XGBoost for tabular features, or deep neural ranking) with concrete reasoning for why it fits this latency/scale profile.
+4. EVALUATION: State offline metrics (e.g., MAE, RMSE, AUC-PR) vs online A/B testing business metrics.
+5. SERVING & LATENCY: Outline feature store lookup, caching, and inference SLA considerations.
+6. MONITORING & DRIFT: Mention model drift detection (feature drift, concept drift) and retraining cadence.
+7. CRITICAL RULE: This is an architectural system discussion. DO NOT write training code or Python scripts unless explicitly instructed!`;
+
+    case "SYSTEM_DESIGN":
+      return `TASK STRATEGY — DISTRIBUTED SYSTEM DESIGN:
+1. REQUIREMENTS & SCALE ASSUMPTIONS: Sentence 1 explicitly frames scale numbers as interview assumptions rather than stated facts (e.g., "To make the design concrete, I'll assume an estimated scale of roughly 50,000 QPS with an 80/20 read/write ratio and a 100ms latency SLA..."). NEVER state invented scale numbers as authoritative personal facts or pretend real production experience with these numbers unless specified in the prompt.
+2. HIGH-LEVEL ARCHITECTURE & DATA FLOW: Walk through the request lifecycle (Client -> CDN/LB -> API Gateway -> Stateless Services -> Cache -> Database).
+3. COMPONENT JUSTIFICATION: For each major architectural choice, state WHY (e.g., "We choose Redis for caching hot session keys because...", "We use Kafka for async message decoupling because...").
+4. BOTTLENECKS & FAILURE MODES: Address single points of failure, partition tolerance, database replication/sharding, and failover strategy.
+5. OBSERVABILITY & TRADE-OFFS: Mention metrics, distributed tracing, and consistency vs availability trade-offs (CAP theorem).
+6. CRITICAL RULE: Provide structured senior-level architectural reasoning. Do not just throw buzzwords without rationale.`;
+
+    case "CASE_STUDY":
+      return `TASK STRATEGY — CASE STUDY & PRODUCT SCENARIO:
+1. OBJECTIVE & SCOPE: Sentence 1 clarifies the primary objective, boundary constraints, and target metric.
+2. STRUCTURED APPROACH: Framework: Objectives -> Key Assumptions -> Analysis & Trade-offs -> Action Plan -> Risks & Mitigation.
+3. DECISION RATIONALE: Articulate why the chosen path maximizes the target metric while managing risk.
+4. NO UNNECESSARY CODE: Keep it focused on engineering strategy, system tradeoffs, and execution.`;
+
+    case "BEHAVIORAL": {
+      const hasExp = options?.hasCandidateExperience ?? false;
+      if (!hasExp) {
+        return `TASK STRATEGY — BEHAVIORAL & LEADERSHIP:
+1. NO CANDIDATE EXPERIENCE PROVIDED — STRICT PERSONALIZATION SCAFFOLD:
+   - Candidate-specific history is NOT provided in the resume, notes, or context.
+   - ABSOLUTE PROHIBITION: You MUST NOT invent a personal story, incident, production outage, or claim you resolved one ("I led...", "I built...", "I resolved...", "At my previous company...").
+   - Instead, deliver a concise spoken verbal framework that explains how the candidate should structure their answer, with explicit personalization scaffolds/placeholders in brackets:
+     "I'd frame this around a real incident from my experience. [Replace this with your specific incident, e.g., a database connection pool exhaustion or cache stampede.] The key is to walk through what I personally did: first, [state your immediate action or data-driven triage], then how I communicated with the team to coordinate the fix, and finally the resolution. I'd finish with what I learned about [e.g., proactive monitoring, blameless post-mortems]..."
+2. SPOKEN STORYTELLING & STRUCTURE:
+   - Deliver an engaging, concise spoken guide. Follow: Context -> Personal Action -> Outcome -> Reflection.
+   - DO NOT output literal section labels like "Situation:", "Task:", "Action:", "Result:". Speak naturally as if answering aloud.
+3. STRICT ANTI-FABRICATION RULES:
+   - NEVER invent personal metrics, percentages (e.g. "improved performance by 30%"), latency numbers, cost savings, team sizes, or revenue.
+   - NEVER invent company names, client names, project titles, responsibilities, or fake achievements.
+   - ONLY cite specific metrics, numbers, companies, or projects if they are explicitly provided in the candidate context/resume/notes.
+   - IF NO METRICS EXIST IN CONTEXT: Focus on qualitative engineering impact (e.g., "which eliminated deployment rollbacks during our peak release cycle") or use an explicit placeholder like "[e.g., reduced deployment cycle by X%]". Do NOT force a quantified result when none exists.`;
+      }
+
+      return `TASK STRATEGY — BEHAVIORAL & LEADERSHIP:
+1. SPOKEN STORYTELLING: Speak naturally in the first person ("I"). Deliver an engaging, concise story grounded strictly in the candidate's authentic background provided below.
+2. PERSONAL AGENCY: Focus on what YOU individually did, your decision-making process, and leadership, not vague collective actions ("I organized a retrospective with the team to identify the bottleneck...").
+3. TRUTHFUL OUTCOME & REFLECTIVE LEARNING: Describe the specific engineering action and qualitative outcome. Close with 1 sentence reflecting on what you learned or how it shaped your engineering practice.
+4. FORMATTING: DO NOT output literal section labels like "Situation:", "Task:", "Action:", "Result:". Speak naturally as if answering aloud.
+5. STRICT ANTI-FABRICATION RULES:
+   - NEVER invent personal metrics, percentages (e.g. "improved performance by 30%"), latency numbers, cost savings, team sizes, or revenue.
+   - NEVER invent company names, client names, project titles, responsibilities, or fake achievements.
+   - ONLY cite specific metrics, numbers, companies, or projects if they are explicitly provided in the candidate context/resume/notes.
+   - IF NO METRICS EXIST IN CONTEXT: Focus on qualitative engineering impact (e.g., "which eliminated deployment rollbacks during our peak release cycle") or use an explicit placeholder like "[e.g., reduced deployment cycle by X%]". Do NOT force a quantified result when none exists.`;
+    }
+
+    case "HR": {
+      const hasComp = options?.hasCompanyContext ?? false;
+      if (!hasComp) {
+        return `TASK STRATEGY — HR & CULTURE FIT:
+1. DIRECT ANSWER FIRST: Sentence 1 answers the question directly (e.g., for motivation, notice period, compensation, or career goals).
+2. TRANSFERABLE VALUES & AUTHENTIC FIT:
+   - When no specific company context is provided, speak to transferable engineering values, collaboration principles, and standard best practices.
+   - DO NOT invent company-specific details, products, internal teams, mission statements, or private company culture.
+3. AUTHENTIC & CONCISE: Speak with genuine enthusiasm, professionalism, and clarity without corporate platitudes or sycophancy (3-4 sentences total).
+4. STRICT ANTI-FABRICATION RULES:
+   - NEVER invent past companies, university degrees, project achievements, or career timeline details not present in the candidate context.
+   - ONLY reference specific employers, tools, or domain experience if supplied in the resume or session context.
+   - If candidate-specific details are not provided, speak to transferable engineering values and sound general practices without fabricating credentials.`;
+      }
+
+      return `TASK STRATEGY — HR & CULTURE FIT:
+1. DIRECT ANSWER FIRST: Sentence 1 answers the question directly (e.g., for motivation, notice period, compensation, or career goals).
+2. MOTIVATION & VALUE PROPOSITION:
+   - Connect your background and work ethic with the role and engineering challenges truthfully.
+   - Connect your authentic background truthfully with the target company and role. Use only the provided company name and role details; do not invent internal products or teams.
+3. AUTHENTIC & CONCISE: Speak with genuine enthusiasm, professionalism, and clarity without corporate platitudes or sycophancy (3-4 sentences total).
+4. STRICT ANTI-FABRICATION RULES:
+   - NEVER invent past companies, university degrees, project achievements, or career timeline details not present in the candidate context.
+   - ONLY reference specific employers, tools, or domain experience if supplied in the resume or session context.
+   - If candidate-specific details are not provided, speak to transferable engineering values and sound general practices without fabricating credentials.`;
+    }
+
+    case "MCQ":
+      return `TASK STRATEGY — MULTIPLE CHOICE (MCQ):
+1. OPTION AND ANSWER FIRST: Sentence 1 states the correct option letter and text immediately ("The correct option is B: O(log N)...").
+2. CONCISE EXPLANATION: In 1-2 crisp sentences, explain why this option is correct and why the primary distractor is incorrect.
+3. STRICTLY NO ESSAYS: Keep it under 40 words.`;
+
+    case "FOLLOW_UP":
+      return `TASK STRATEGY — FOLLOW-UP QUESTION:
+1. DIRECT ANSWER TO IMMEDIATE QUESTION: Sentence 1 answers the specific follow-up directly without hesitation.
+2. LEVERAGE ACTIVE CONTEXT & TRUTHFUL GROUNDING: Build upon the established decisions and discussion thread without repeating the entire previous explanation. Strictly reference only facts, technologies, and metrics established in the active context; do not introduce new fabricated credentials or unanchored claims.
+3. CONCRETE REASONING: Give the specific justification, trade-off, or optimization asked for.`;
+
+    case "COMPARISON":
+      return `TASK STRATEGY — TECHNICAL COMPARISON:
+1. DIRECT VERDICT FIRST: Sentence 1 summarizes the fundamental difference or when to choose which.
+2. DIMENSION COMPARISON: Compare across 2-3 key dimensions (performance/latency, complexity, operational overhead, use-case fit).
+3. PRACTICAL RECOMMENDATION: State concrete guideline on when to use A vs B.`;
+
+    default:
+      return `TASK STRATEGY — GENERAL TECHNICAL INTERVIEW:
+1. DIRECT ANSWER FIRST: Sentence 1 directly answers the core question.
+2. REASONING & DEPTH: Explain the technical rationale clearly, providing a concrete example or practical trade-off.
+3. CONCISE & ARTICULATE: Sound like a knowledgeable senior engineer speaking naturally in a live conversation (~30-60 seconds spoken).`;
+  }
+}
+
+/**
+ * Format bounded context snapshot into structured prompt text.
+ */
+export function formatBoundedContextForPrompt(boundedContext?: any): string {
+  if (!boundedContext) return "";
+  const parts: string[] = [];
+
+  if (boundedContext.activeThread) {
+    parts.push(`ACTIVE THREAD TOPIC: ${boundedContext.activeThread.parentTopic} (${boundedContext.activeThread.taskType})`);
+    if (boundedContext.activeThread.decisions?.length > 0) {
+      parts.push(`ESTABLISHED DECISIONS IN THREAD: ${boundedContext.activeThread.decisions.join("; ")}`);
+    }
+  }
+
+  if (boundedContext.screenObservation) {
+    parts.push(`LATEST SCREEN OBSERVATION: Problem: "${boundedContext.screenObservation.problem}"`);
+    if (boundedContext.screenObservation.entities?.length > 0) {
+      parts.push(`KEY CONSTRAINTS ON SCREEN: ${boundedContext.screenObservation.entities.join(", ")}`);
+    }
+  }
+
+  if (boundedContext.recentTurns?.length > 0) {
+    const dialog = boundedContext.recentTurns
+      .map((t: any) => `${t.speaker === "candidate" ? "Candidate" : "Interviewer"}: ${t.text}`)
+      .join("\n");
+    parts.push(`RECENT CONVERSATION CONTEXT:\n${dialog}`);
+  }
+
+  if (boundedContext.stableFacts?.length > 0) {
+    parts.push(`STABLE FACTS: ${boundedContext.stableFacts.join("; ")}`);
+  }
+
+  if (boundedContext.candidateProfile) {
+    parts.push(`CANDIDATE ROLE: ${boundedContext.candidateProfile.level || ""} ${boundedContext.candidateProfile.role || ""} | SKILLS: ${boundedContext.candidateProfile.skills?.join(", ") || "General"}`);
+  }
+
+  return parts.length > 0
+    ? `\n\n=== BOUNDED INTERVIEW CONTEXT ===\n${parts.join("\n\n")}\n=================================\n`
+    : "";
 }
 
 export class GroqBackendService {
@@ -117,11 +352,15 @@ export class GroqBackendService {
     return DEFAULT_VISION_MODEL;
   }
 
-  public buildSystemPrompt(context?: SessionContextData): string {
+
+  public buildSystemPrompt(
+    context?: SessionContextData,
+    taskMetadata?: TaskMetadata
+  ): string {
     const jobTitle = context?.jobTitle || context?.job_title || "Software Engineer";
     const company = context?.company ? ` at ${context.company}` : "";
     const experienceLevel = context?.experienceLevel || context?.experience_level || "mid-level";
-    const interviewRound = context?.interviewRound || context?.interview_round || "technical";
+    const interviewRound = (context?.interviewRound || context?.interview_round || "technical").toLowerCase();
 
     const isHrRound =
       interviewRound === "hr_screening" ||
@@ -129,79 +368,94 @@ export class GroqBackendService {
       interviewRound === "behavioral" ||
       interviewRound === "culture_fit";
 
-    let prompt: string;
+    const effectiveTaskType =
+      taskMetadata?.taskType ||
+      context?.taskType ||
+      (isHrRound ? (interviewRound === "behavioral" ? "BEHAVIORAL" : "HR") : "GENERAL_TECHNICAL");
 
-    if (isHrRound) {
-      prompt = `You are the candidate in a live HR / behavioral job interview for a ${experienceLevel} ${jobTitle}${company} (${interviewRound} round).
-You are answering the interviewer's questions in real time. Your persona is professional, articulate, positive, collaborative, and confident — the kind of well-rounded candidate a recruiter, HR lead, or hiring manager is excited to advance to the next round.
+    const effectiveParentTaskType =
+      taskMetadata?.parentTaskType || context?.parentTaskType;
 
-ANSWER FRAMEWORKS — use the right one for each question type:
+    const requiresCode =
+      taskMetadata?.requiresCode !== undefined
+        ? taskMetadata.requiresCode
+        : context?.requiresCode;
 
-1. "TELL ME ABOUT YOURSELF" / INTRO: Give a concise career narrative in 3-4 sentences — your background, core strengths, key achievements, and what excites you about this role and company.
-2. BEHAVIORAL / SITUATIONAL ("Tell me about a time...", "How did you handle..."): Use the STAR method (Situation, Task, Action, Result) in 4-5 sentences. Focus on teamwork, conflict resolution, leadership, adaptability, ownership, or learning from challenges.
-3. MOTIVATION & CULTURE FIT ("Why our company?", "Where do you see yourself in 5 years?"): Connect your personal career goals and work ethic with the company's mission and team values in 2-3 sentences.
-4. LOGISTICS & WORK STYLE (Notice period, compensation expectations, remote/hybrid preferences, team collaboration): Give a direct, professional, and reasonable answer first, then elaborate briefly with flexibility.
-5. GENERAL HR / OPINION / "WHY SHOULD WE HIRE YOU?": State your perspective clearly, highlighting your unique blend of skills, dependability, and positive attitude in 2-3 sentences.
+    const boundedContext = taskMetadata?.boundedContext || context?.boundedContext;
+    const hasCandidateExperience = !!(
+      (context?.resumeText && context.resumeText.trim().length >= 25) ||
+      (context?.resume_text && context.resume_text.trim().length >= 25) ||
+      (context?.notes && context.notes.trim().length >= 15) ||
+      (boundedContext?.stableFacts && boundedContext.stableFacts.length > 0) ||
+      (boundedContext?.candidateProfile?.skills && boundedContext.candidateProfile.skills.length > 0)
+    );
 
-MANDATORY RULES:
-1. Answer in FIRST PERSON ("I", "my", "we") — you ARE the candidate.
-2. NO bullet points, NO numbered lists, NO markdown headers. Speak naturally in conversational, spoken English.
-3. NO greetings, NO filler phrases like "Great question!", "Sure!", "That's a great point". Start with the actual answer immediately.
-4. NO UNNECESSARY TECHNICAL JARGON. Do not dive into deep code, complex architecture, or low-level implementation details unless the interviewer explicitly asks for them. Keep explanations accessible, emphasizing business impact, communication, problem-solving, teamwork, adaptability, and results.
-5. NEVER fabricate jobs, companies, or experiences not in the resume. If the resume has real experience, use it authentically. If not, speak in terms of general professional experience ("In my previous roles...", "When collaborating with cross-functional teams...").
-6. Keep answers TIGHT — 3 to 6 sentences max for most questions. Be clear, concise, and engaging without rambling. Interview time is limited.
-7. For yes/no or logistical questions, answer clearly FIRST, then provide brief context.
-8. STT ROBUSTNESS: Transcripts are generated by live speech-to-text and may contain slight phonetic misrecognitions or missing punctuation. Intelligently infer the interviewer's intended HR or behavioral question from conversational context and answer the true question directly without commenting on any transcript glitch.`;
+    const hasCompanyContext = !!(
+      context?.company &&
+      context.company.trim().length > 1 &&
+      !/^(unknown|target company|n\/a|none)$/i.test(context.company.trim())
+    );
 
-      if (context) {
-        const resume = context.resumeText || context.resume_text;
-        if (resume) {
-          prompt += `\n\nCANDIDATE'S ACTUAL BACKGROUND (use this for specific answers):\n${resume.slice(0, 2000)}`;
-        }
-        if (context.notes) {
-          prompt += `\n\nFOCUS AREAS / EXTRA CONTEXT:\n${context.notes.slice(0, 800)}`;
-        }
+    const strategyInstructions = getTaskStrategyInstructions(
+      effectiveTaskType,
+      effectiveParentTaskType,
+      requiresCode,
+      { hasCandidateExperience, hasCompanyContext }
+    );
+
+    const boundedContextBlock = formatBoundedContextForPrompt(
+      boundedContext
+    );
+
+    let prompt = `You are the candidate in a live technical job interview for a ${experienceLevel} ${jobTitle}${company} (${interviewRound} round).
+You are answering the interviewer's questions in real time. Your persona is a poised, articulate, senior-level candidate who demonstrates deep engineering judgment, clear trade-off evaluation, and practical real-world experience.
+
+CRITICAL SPOKEN-ANSWER-FIRST GUIDELINES:
+1. PRIMARY CANDIDATE PERSONA:
+   - When answering technical, coding, conceptual, system design, or ML design questions: Speak in FIRST PERSON ("I", "my") as the candidate explaining your reasoning and architecture directly.
+   - When answering BEHAVIORAL questions WITH candidate background: Speak in first person ("I") grounding your narrative strictly in the authentic experience provided below.
+   - When answering BEHAVIORAL questions WITHOUT candidate background: You MUST NOT fabricate or invent a personal story, past employer, or production incident that you allegedly experienced ("I led...", "I resolved...", "At my previous company..."). Instead, provide a spoken answer framework using personalization scaffolds in brackets (e.g., "I'd frame this around a real incident from my experience. [Replace this with your specific incident, e.g., a database connection pool exhaustion or cache stampede.] The key is to walk through what I personally did: first, [state your immediate action or data-driven triage], then how I communicated with the team to coordinate the fix, and finally the resolution. I'd finish with what I learned about [e.g., proactive monitoring, blameless post-mortems]...").
+2. SENTENCE 1 MUST ANSWER DIRECTLY: Provide the direct, core answer in the very first sentence. Never evade, stall, or beat around the bush.
+3. NATURAL SPOKEN ARTICULATION: Use crisp conversational speech that sounds natural when spoken aloud:
+   - "I'd approach this in two main parts..."
+   - "The primary reason I'd choose X over Y is..."
+   - "The key trade-off here is write latency versus read availability..."
+4. STRICTLY FORBIDDEN OPENINGS & FILLER:
+   - NEVER start with: "That's a great question!", "Sure!", "In today's fast-paced world...", "First of all, I'd like to say...", "It depends" (unless immediately followed by specific technical trade-offs).
+   - NEVER use textbook definitions or generic corporate fluff.
+5. ANTI-FABRICATION:
+   - If candidate resume details are provided below, leverage them authentically.
+   - If candidate-specific background is NOT provided, NEVER invent fictitious employers, metrics, production incidents, or team sizes. Use realistic engineering scenarios or explicitly indicate what the candidate should personalize.
+6. SYSTEM DESIGN ASSUMPTION FRAMING:
+   - In system design and scale discussions, explicitly frame scale numbers and throughput as assumptions (e.g., "To make the design concrete, I'll assume an estimated scale of roughly 50,000 QPS..."). Never assert invented scale numbers as personal production facts.
+7. DYNAMIC DEPTH:
+   - Simple conceptual / MCQ: ~20-40 seconds spoken (~2-4 sentences).
+   - Normal technical / Coding: ~30-60 seconds spoken.
+   - Complex ML Design / System Design / Case Study: ~60-120 seconds structured candidate monologue.
+8. STT ROBUSTNESS: Live speech-to-text transcripts may contain minor phonetic misrecognitions of technical terms (e.g. 'state' for 'set', 'sink' for 'sync', 'py torch' for 'PyTorch', 'e c two' for 'EC2'). Intelligently deduce the intended concept and answer directly without commenting on any transcript glitch.
+
+==================================================
+CURRENT INTERVIEW TASK: ${effectiveTaskType}${effectiveParentTaskType ? ` (Follow-up to ${effectiveParentTaskType})` : ""}
+==================================================
+
+${strategyInstructions}
+${boundedContextBlock}`;
+
+    if (context) {
+      const resume = context.resumeText || context.resume_text;
+      if (resume) {
+        prompt += `\n\nCANDIDATE'S ACTUAL BACKGROUND (use this authentic experience; NEVER invent beyond this):\n${resume.slice(0, 2000)}`;
       }
-
-      prompt += `\n\nRemember: Real, concise, personable, and confident. Emphasize communication, ownership, and adaptability. Answer like a poised, articulate candidate whom HR would be confident moving forward.`;
-    } else {
-      prompt = `You are the candidate in a live job interview for a ${experienceLevel} ${jobTitle}${company} (${interviewRound} round).
-You are answering the interviewer's questions in real time. Your job is to give sharp, genuine, on-point interview answers — the kind a strong candidate gives to get hired, not textbook filler.
-
-ANSWER FRAMEWORKS — use the right one for each question type:
-
-1. BEHAVIORAL ("Tell me about a time...", "How did you handle..."): Use STAR — 1 sentence each for Situation, Task, Action, and Result. Keep it real and specific. Total: 4-5 sentences.
-2. TECHNICAL ("How does X work?", "What is Y?", "Explain Z"): Give the direct concept in 1-2 sentences, then a real-world application or comparison in 1-2 sentences. No fluff.
-3. SYSTEM DESIGN ("Design a...", "How would you architect..."): Give 2-3 clear design decisions with brief justifications. Mention trade-offs.
-4. CODING PROBLEM: Briefly explain your approach in 1 sentence, then write clean minimal code.
-5. INTRO / "Tell me about yourself": 3-sentence structure — who you are + what you do + what you're looking for. Confident, not a resume recitation.
-6. OPINION / SITUATIONAL ("What would you do if..."): Give a direct opinion/decision first, then explain why in 1-2 sentences.
-
-MANDATORY RULES:
-1. Answer in FIRST PERSON ("I", "my", "we") — you ARE the candidate.
-2. NO bullet points, NO numbered lists, NO markdown headers. Speak naturally as if talking aloud.
-3. NO greetings, NO filler phrases like "Great question!", "Sure!", "That's a great point". Start with the actual answer immediately.
-4. NEVER fabricate jobs, companies, or experiences not in the resume. If the resume has real experience, use it. If not, speak in general engineering terms ("In my experience..." or "When I've worked on similar problems...").
-5. Keep answers TIGHT — 3 to 6 sentences max for most questions. Interview time is limited.
-6. Sound confident and direct, like someone who knows their stuff. Not nervous, not over-explaining.
-7. For yes/no questions, answer yes or no FIRST, then explain briefly.
-8. STT ROBUSTNESS: Transcripts are generated by live speech-to-text and may contain slight phonetic misrecognitions of technical jargon (e.g., 'state' instead of 'set', 'table' instead of 'tuple', 'sink' instead of 'sync', 'py torch' instead of 'PyTorch', 'dunder' instead of '__dunder__', 'fast api' instead of 'FastAPI', 'spring boot' instead of 'Spring Boot', 's three' instead of 'S3', 'e c two' instead of 'EC2'). Intelligently infer the interviewer's intended technical question from context across all fields (Python, FastAPI, Django, Flask, Data Science, AI/ML, Data Analysis, AWS, System Design, Java, Spring Boot, Networking, SQL, DSA, HR behavioral) and answer the true concept directly without pointing out the transcript glitch.`;
-
-      if (context) {
-        const resume = context.resumeText || context.resume_text;
-        if (resume) {
-          prompt += `\n\nCANDIDATE'S ACTUAL BACKGROUND (use this for specific answers):\n${resume.slice(0, 2000)}`;
-        }
-        if (context.notes) {
-          prompt += `\n\nFOCUS AREAS / EXTRA CONTEXT:\n${context.notes.slice(0, 800)}`;
-        }
+      if (context.notes) {
+        prompt += `\n\nINTERVIEW FOCUS NOTES:\n${context.notes.slice(0, 800)}`;
       }
-
-      prompt += `\n\nRemember: Real, concise, confident. No fake experiences. No padding. Answer like a senior engineer who has done this before.`;
     }
+
+    prompt += `\n\nREMEMBER: You are speaking aloud as the candidate. Sentence 1 answers directly. Concrete reasoning over buzzwords. No filler.`;
 
     return prompt;
   }
+
 
   /**
    * Stream a chat completion from Groq API.
@@ -209,11 +463,26 @@ MANDATORY RULES:
   public async streamChat(
     options: ChatStreamOptions,
     onChunk: (chunk: string) => void
-  ): Promise<{ fullAnswer: string; modelUsed: string }> {
+  ): Promise<ChatStreamResult> {
     const client = this.getClient(options.apiKey);
 
+    const meta: TaskMetadata | undefined =
+      options.taskMetadata ||
+      options.sessionContext?.taskMetadata ||
+      (options.sessionContext
+        ? {
+            taskType: options.sessionContext.taskType,
+            parentTaskType: options.sessionContext.parentTaskType,
+            confidence: options.sessionContext.taskConfidence,
+            tier: options.sessionContext.taskTier,
+            suggestedDepth: options.sessionContext.suggestedDepth,
+            requiresCode: options.sessionContext.requiresCode,
+            boundedContext: options.sessionContext.boundedContext,
+          }
+        : undefined);
+
     const targetModel = this.resolveModel(options.model);
-    const systemPrompt = this.buildSystemPrompt(options.sessionContext);
+    const systemPrompt = this.buildSystemPrompt(options.sessionContext, meta);
     
     // Check if system prompt is already in messages, otherwise prepend
     const hasSystemMsg = options.messages.some((m) => m.role === "system");
@@ -223,19 +492,21 @@ MANDATORY RULES:
 
     let stream: any;
     let modelUsed = targetModel;
+    const requestedMaxTokens = options.maxTokens || 1024;
 
     try {
       stream = await client.chat.completions.create(
         {
           model: targetModel,
           messages: fullMessages,
-          max_tokens: 1024,
+          max_tokens: requestedMaxTokens,
           temperature: 0.55,
           stream: true,
         },
         { signal: options.signal }
       );
     } catch (err: any) {
+      console.warn(`[GroqStreamChatFallback] Target ${targetModel} failed: status=${err?.status} msg=${err?.message}`);
       // Fallback model handling on 404 or specific model rate limits
       if (
         (err?.status === 404 || err?.message?.includes("does not exist") || err?.status === 429) &&
@@ -246,7 +517,7 @@ MANDATORY RULES:
           {
             model: FALLBACK_MODEL,
             messages: fullMessages,
-            max_tokens: 800,
+            max_tokens: options.maxTokens || 800,
             temperature: 0.6,
             stream: true,
           },
@@ -258,15 +529,143 @@ MANDATORY RULES:
     }
 
     let fullAnswer = "";
+    let inThinkBlock = false;
+    let buffer = "";
+    const isQwen = modelUsed.includes("qwen");
+    let finishReason: "stop" | "length" | "abort" | "error" | "unknown" = "unknown";
+    let chunkCount = 0;
+    const startTime = Date.now();
+
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
+      chunkCount++;
+      const fr = chunk.choices[0]?.finish_reason;
+      if (fr) {
+        if (fr === "stop" || fr === "length") {
+          finishReason = fr;
+        } else {
+          finishReason = fr as any;
+        }
+      }
+
+      const delta = chunk.choices[0]?.delta?.content || "";
+      if (!delta) continue;
+
+      if (!isQwen) {
         fullAnswer += delta;
         onChunk(delta);
+        continue;
+      }
+
+      // Filter <think>...</think> tags if Qwen emits thinking blocks
+      buffer += delta;
+      while (buffer.length > 0) {
+        if (!inThinkBlock) {
+          const thinkStart = buffer.indexOf("<think>");
+          if (thinkStart !== -1) {
+            if (thinkStart > 0) {
+              const text = buffer.slice(0, thinkStart);
+              fullAnswer += text;
+              onChunk(text);
+            }
+            inThinkBlock = true;
+            buffer = buffer.slice(thinkStart + 7);
+          } else {
+            let hasPartial = false;
+            for (let len = Math.min(buffer.length, 6); len > 0; len--) {
+              if ("<think>".startsWith(buffer.slice(-len))) {
+                const safe = buffer.slice(0, -len);
+                if (safe) {
+                  fullAnswer += safe;
+                  onChunk(safe);
+                }
+                buffer = buffer.slice(-len);
+                hasPartial = true;
+                break;
+              }
+            }
+            if (!hasPartial) {
+              fullAnswer += buffer;
+              onChunk(buffer);
+              buffer = "";
+            } else {
+              break;
+            }
+          }
+        } else {
+          const thinkEnd = buffer.indexOf("</think>");
+          if (thinkEnd !== -1) {
+            inThinkBlock = false;
+            buffer = buffer.slice(thinkEnd + 8).replace(/^\s+/, "");
+          } else {
+            buffer = "";
+          }
+        }
       }
     }
 
-    return { fullAnswer, modelUsed };
+    if (buffer && !inThinkBlock) {
+      fullAnswer += buffer;
+      onChunk(buffer);
+    }
+
+    if (options.signal?.aborted) {
+      finishReason = "abort";
+    } else if (finishReason === "unknown" && fullAnswer.length > 0) {
+      finishReason = "stop";
+    }
+
+    const boundedContext = meta?.boundedContext || options.sessionContext?.boundedContext;
+    const hasCandidateExperience = !!(
+      (options.sessionContext?.resumeText && options.sessionContext.resumeText.trim().length >= 25) ||
+      (options.sessionContext?.resume_text && options.sessionContext.resume_text.trim().length >= 25) ||
+      (options.sessionContext?.notes && options.sessionContext.notes.trim().length >= 15) ||
+      (boundedContext?.stableFacts && boundedContext.stableFacts.length > 0) ||
+      (boundedContext?.candidateProfile?.skills && boundedContext.candidateProfile.skills.length > 0)
+    );
+
+    const hasCompanyContext = !!(
+      options.sessionContext?.company &&
+      options.sessionContext.company.trim().length > 1 &&
+      !/^(unknown|target company|n\/a|none)$/i.test(options.sessionContext.company.trim())
+    );
+
+    const effectiveTaskType = meta?.taskType || options.sessionContext?.taskType || "GENERAL_TECHNICAL";
+    const effectiveParentTaskType = meta?.parentTaskType || options.sessionContext?.parentTaskType;
+
+    const qualityGate = verifyAnswerQuality(fullAnswer.trim(), {
+      taskType: effectiveTaskType,
+      parentTaskType: effectiveParentTaskType,
+      hasCandidateExperience,
+      hasCompanyContext,
+      candidateContext: {
+        resumeText: options.sessionContext?.resumeText || options.sessionContext?.resume_text,
+        notes: options.sessionContext?.notes,
+        skills: boundedContext?.candidateProfile?.skills,
+        company: options.sessionContext?.company,
+        stableFacts: boundedContext?.stableFacts,
+      },
+    });
+
+    if (!qualityGate.passed) {
+      console.warn(
+        `[QualityGateWarning] req=${options.requestId || "unknown"} violations=${qualityGate.violations.map((v) => v.code).join(",")}`
+      );
+    }
+
+    // Diagnostic operational logging (strictly private: no content/keys)
+    console.log(
+      `[GroqChatDiagnostic] req=${options.requestId || "unknown"} model=${modelUsed} fr=${finishReason} complete=${finishReason === "stop"} chunks=${chunkCount} dur=${Date.now() - startTime}ms chars=${fullAnswer.length} qualityPassed=${qualityGate.passed}`
+    );
+
+    return {
+      fullAnswer: fullAnswer.trim(),
+      modelUsed,
+      finishReason,
+      isComplete: finishReason === "stop",
+      chunkCount,
+      durationMs: Date.now() - startTime,
+      qualityGate,
+    };
   }
 
   /**
@@ -283,17 +682,34 @@ MANDATORY RULES:
 
     const questionText =
       options.question ||
-      "You are an expert technical interview co-pilot assisting the candidate in real time.\n" +
-      "TASK:\n" +
-      "1. Identify the exact interview question, coding problem, multiple choice question (MCQ), or system design challenge visible on this screen.\n" +
-      "2. DIRECT ANSWER FIRST: Provide the immediate, actionable solution, correct MCQ option, or optimal code immediately.\n" +
-      "CRITICAL RULES:\n" +
-      "- DO NOT describe the screenshot, IDE layout, window borders, or UI elements.\n" +
-      "- DO NOT say 'In this screenshot I see...' or 'The screen displays...'.\n" +
-      "- If a coding problem: give a 1-sentence approach then the optimal, complete solution code with time/space complexity.\n" +
-      "- If an MCQ: state the correct option letter/text clearly and explain why in 1-2 sentences.\n" +
-      "- If terminal or code error: state the exact fix immediately.\n" +
-      "- If a question is highlighted or asked by an interviewer, answer that question directly.";
+      `You are an expert technical interview co-pilot assisting the candidate in real time from a live screen capture.
+
+TASK & ANALYSIS OBJECTIVE (SINGLE PASS):
+1. EXAMINE THE SCREEN: Identify what is visible (coding question, ML/system design problem, SQL problem, MCQ, debugging trace, or conceptual slide).
+2. SELECT THE APPROPRIATE STRATEGY INTERNALLY:
+   - IF ML DESIGN OR CASE STUDY (e.g., "Design an ETA prediction ML system", "Recommendation architecture"):
+     Provide structured ML system design reasoning: problem framing & target, data & features, leakage prevention, baseline vs chosen model (with WHY), offline/online eval, latency/serving, drift monitoring, trade-offs.
+     CRITICAL: DO NOT automatically generate Python or training code!
+   - IF SYSTEM DESIGN (e.g., "Design a URL shortener", "Design Twitter"):
+     Provide structured architecture reasoning: scale assumptions, component choices + WHY, bottlenecks, failure modes, replication, observability. DO NOT generate code.
+   - IF CODING PROBLEM (e.g., LeetCode, "Write a function...", "Implement..."):
+     1-2 sentence spoken approach first, clean optimal code block, Big-O time and space complexity, and edge cases handled.
+   - IF SQL QUERY:
+     Formatted SQL query first, followed by clear 1-2 sentence explanation of joins/aggregations/window logic and index considerations.
+   - IF MULTIPLE CHOICE QUESTION (MCQ):
+     State the correct option letter and text in sentence 1, followed by a concise 1-2 sentence reason why it is correct.
+   - IF ERROR / DEBUGGING:
+     State root cause in sentence 1, exact fix code, and prevention tip.
+   - IF CONCEPTUAL QUESTION:
+     Direct definition/answer in sentence 1, under-the-hood mechanism, example, and trade-off. No code.
+   - IF AMBIGUOUS:
+     Provide conservative, high-level analytical reasoning. NEVER default to code generation!
+
+RULES:
+- DIRECT SPOKEN ANSWER FIRST: Provide the immediate, actionable solution that the candidate can say aloud.
+- DO NOT describe the screenshot, IDE chrome, window frames, or say "In this screenshot...".
+- NO generic textbook filler.`;
+
 
     const logErrorDiagnostics = (err: any, attemptedModel: string) => {
       try {
@@ -358,9 +774,12 @@ MANDATORY RULES:
       return 20; // safe default cooldown
     };
 
-    const executeStream = async (targetModel: string): Promise<{ fullAnswer: string; modelUsed: string }> => {
+    const executeStream = async (targetModel: string): Promise<ScreenAnalysisResult> => {
       const isQwen36 = targetModel.includes("qwen3.6");
       const maxTokens = isQwen36 ? 800 : 1024;
+      let finishReason: "stop" | "length" | "abort" | "error" | "unknown" = "unknown";
+      let chunkCount = 0;
+      const startTime = Date.now();
 
       const streamParams: any = {
         model: targetModel,
@@ -391,6 +810,16 @@ MANDATORY RULES:
       let buffer = "";
 
       for await (const chunk of stream) {
+        chunkCount++;
+        const fr = chunk.choices[0]?.finish_reason;
+        if (fr) {
+          if (fr === "stop" || fr === "length") {
+            finishReason = fr;
+          } else {
+            finishReason = fr as any;
+          }
+        }
+
         const delta = chunk.choices[0]?.delta?.content || "";
         if (!delta) continue;
 
@@ -453,7 +882,24 @@ MANDATORY RULES:
         onChunk(buffer);
       }
 
-      return { fullAnswer: fullAnswer.trim(), modelUsed: targetModel };
+      if (options.signal?.aborted) {
+        finishReason = "abort";
+      } else if (finishReason === "unknown" && fullAnswer.length > 0) {
+        finishReason = "stop";
+      }
+
+      console.log(
+        `[GroqVisionDiagnostic] req=${options.requestId || "unknown"} model=${targetModel} fr=${finishReason} complete=${finishReason === "stop"} chunks=${chunkCount} dur=${Date.now() - startTime}ms chars=${fullAnswer.length}`
+      );
+
+      return {
+        fullAnswer: fullAnswer.trim(),
+        modelUsed: targetModel,
+        finishReason,
+        isComplete: finishReason === "stop",
+        chunkCount,
+        durationMs: Date.now() - startTime,
+      };
     };
 
     let lastError: any = null;
@@ -542,6 +988,8 @@ MANDATORY RULES:
       isError: true,
       errorCode,
       retryAfterSeconds: retrySeconds,
+      finishReason: "error",
+      isComplete: false,
     };
   }
 }

@@ -47,7 +47,7 @@ for (const _p of _envPaths) {
   } catch (_) {}
 }
 
-import { app, BrowserWindow, screen, desktopCapturer, systemPreferences, shell, globalShortcut } from "electron";
+import { app, BrowserWindow, screen, desktopCapturer, systemPreferences, shell, globalShortcut, session } from "electron";
 import { isContentProtectionFullySupported, applyContentProtection, removeContentProtection, applyPrivateMode as applyPrivateModeHelper } from "./windowProtection";
 import { parseSessionStartUrl } from "./deepLink";
 import { registerIpcHandlers } from "./ipcHandlers";
@@ -285,6 +285,10 @@ function createWindow() {
     }
   });
 
+  win.webContents.on("console-message", (_event, level, message) => {
+    console.log(`[Renderer] ${message}`);
+  });
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     const allowedDomains = [
       "https://meooow.tech",
@@ -328,6 +332,16 @@ function createWindow() {
   const scriptSrc = isDevMode
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.razorpay.com https://*.razorpay.in https://cdnjs.cloudflare.com;"
     : "script-src 'self' 'unsafe-inline' https://*.razorpay.com https://*.razorpay.in https://cdnjs.cloudflare.com;";
+  // Rewrite Origin for Meoow API and WebSocket requests so Render's CORS allowlist is satisfied
+  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    const requestHeaders = { ...details.requestHeaders };
+    const url = details.url.toLowerCase();
+    if (url.includes("api.meooow.tech") || url.includes("api.meoow.tech")) {
+      requestHeaders["Origin"] = "https://meooow.tech";
+    }
+    callback({ requestHeaders });
+  });
+
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const url = details.url.toLowerCase();
     // Do NOT inject or overwrite CSP headers on external third-party resources (Razorpay, CDNs, fonts, etc.)
@@ -344,9 +358,25 @@ function createWindow() {
       return;
     }
 
+    const responseHeaders = { ...details.responseHeaders };
+
+    // For Meoow API requests, ensure unified lowercase permissive CORS headers and avoid injecting app CSP
+    if (url.includes("api.meooow.tech") || url.includes("api.meoow.tech")) {
+      for (const key of Object.keys(responseHeaders)) {
+        if (key.toLowerCase().startsWith("access-control-allow-")) {
+          delete responseHeaders[key];
+        }
+      }
+      responseHeaders["access-control-allow-origin"] = ["*"];
+      responseHeaders["access-control-allow-methods"] = ["GET, POST, PUT, DELETE, PATCH, OPTIONS"];
+      responseHeaders["access-control-allow-headers"] = ["*"];
+      callback({ responseHeaders });
+      return;
+    }
+
     callback({
       responseHeaders: {
-        ...details.responseHeaders,
+        ...responseHeaders,
         "Content-Security-Policy": [
           "default-src 'self' http://localhost:* blob: filesystem:;" +
           "connect-src 'self' https://api.meooow.tech wss://api.meooow.tech https://*.razorpay.com https://*.razorpay.in https://lumberjack.razorpay.com http: https: ws: wss: blob: filesystem:;" +

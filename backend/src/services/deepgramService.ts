@@ -12,6 +12,7 @@ export interface DeepgramLiveConfig {
   vad_events?: boolean;
   multichannel?: boolean;
   channels?: number;
+  utterance_end_ms?: number;
 }
 
 export const DEFAULT_DEEPGRAM_CONFIG: Required<DeepgramLiveConfig> = {
@@ -23,6 +24,7 @@ export const DEFAULT_DEEPGRAM_CONFIG: Required<DeepgramLiveConfig> = {
   vad_events: true,
   multichannel: true,
   channels: 2,
+  utterance_end_ms: 1000,
 };
 
 export interface DeepgramServiceCallbacks {
@@ -61,6 +63,7 @@ export class DeepgramLiveSession {
       interim_results: String(this.config.interim_results),
       endpointing: String(this.config.endpointing),
       vad_events: String(this.config.vad_events),
+      utterance_end_ms: String(this.config.utterance_end_ms),
     });
 
     if (this.config.multichannel && this.config.channels > 1) {

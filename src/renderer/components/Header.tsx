@@ -25,6 +25,8 @@ interface HeaderProps {
   onReconnectCopilot: () => void;
   onEnd: () => void;
   onAnalyzeScreen: () => void;
+  isAnalyzing?: boolean;
+  analyzeCooldown?: number;
   isMicEnabled: boolean;
   onToggleMic: () => void;
   isPurchaseModalOpen?: boolean;
@@ -51,6 +53,8 @@ export default function Header({
   onReconnectCopilot,
   onEnd,
   onAnalyzeScreen,
+  isAnalyzing = false,
+  analyzeCooldown = 0,
   isMicEnabled,
   onToggleMic,
   isPurchaseModalOpen: propIsPurchaseModalOpen,
@@ -408,15 +412,23 @@ export default function Header({
               <button
                 type="button"
                 onClick={onAnalyzeScreen}
-                className="analyze-button"
-                title="Analyze Screen (Ctrl+Shift+A)"
+                disabled={isAnalyzing || analyzeCooldown > 0}
+                className={`analyze-button ${isAnalyzing ? 'analyzing' : ''}`}
+                style={isAnalyzing || analyzeCooldown > 0 ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
+                title={
+                  analyzeCooldown > 0
+                    ? `Rate limited. Retry in ~${analyzeCooldown}s`
+                    : isAnalyzing
+                    ? 'Analyzing Screen...'
+                    : 'Analyze Screen (Ctrl+Shift+A)'
+                }
                 data-window-interactive="true"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z" />
                   <path d="M20.054 15.987H3.946" />
                 </svg>
-                Analyze
+                {analyzeCooldown > 0 ? `Retry (${analyzeCooldown}s)` : isAnalyzing ? 'Analyzing...' : 'Analyze'}
               </button>
               <button
                 type="button"
