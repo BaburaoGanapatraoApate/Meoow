@@ -719,7 +719,9 @@ function MeowApp() {
 
             // ALWAYS commit completed answer to history, whether it was foreground or background
             if (finalAnswerText) {
-              interviewContextManager.recordAiAnswer(finalAnswerText);
+              const rawSource = answer.source || stream?.source || 'manual';
+              const effectiveSource = rawSource.startsWith('screen') ? 'screen' : rawSource === 'audio' ? 'audio' : 'manual';
+              interviewContextManager.recordAiAnswer(finalAnswerText, effectiveSource as any);
               const finalAnswer: Answer = {
                 ...answer,
                 answer: finalAnswerText,

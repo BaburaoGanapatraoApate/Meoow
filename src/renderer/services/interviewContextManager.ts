@@ -183,11 +183,12 @@ export class InterviewContextManager {
     // Process event state reduction
     switch (input.type) {
       case 'TRANSCRIPT_TURN_ADDED': {
-        const { speaker, text } = input.payload;
+        const { speaker, text, source } = input.payload;
         const turn: DialogueTurn = {
           turnId: `turn_${this.sequenceNumber}`,
           sequenceNumber: this.sequenceNumber,
           speaker,
+          source: source || 'audio',
           text,
           timestamp: event.timestamp,
           tokenCount: estimateTokens(text),
@@ -240,14 +241,27 @@ export class InterviewContextManager {
         if (taskType) {
           this.current.taskType = taskType;
         }
-        // Manual question does NOT wipe existing turns or screen observations!
+        const turn: DialogueTurn = {
+          turnId: `turn_${this.sequenceNumber}`,
+          sequenceNumber: this.sequenceNumber,
+          speaker: 'candidate',
+          source: 'manual',
+          text: text.trim(),
+          timestamp: event.timestamp,
+          tokenCount: estimateTokens(text),
+        };
+        this.recentTurns.push(turn);
+        if (this.recentTurns.length > 20) {
+          this.recentTurns.shift();
+        }
         break;
       }
 
       case 'AI_ANSWER_RECORDED': {
-        const { answer, taskType, decisions } = input.payload;
+        const { answer, taskType, decisions, source } = input.payload;
+        const conciseSummary = answer.length > 150 ? answer.slice(0, 150).trim() + '...' : answer.trim();
         if (this.activeDiscussionThread) {
-          this.activeDiscussionThread.lastAnswerSummary = answer.slice(0, 200);
+          this.activeDiscussionThread.lastAnswerSummary = conciseSummary;
           this.activeDiscussionThread.turnCount++;
           if (Array.isArray(decisions) && decisions.length > 0) {
             this.activeDiscussionThread.establishedDecisions.push(...decisions);
@@ -255,6 +269,19 @@ export class InterviewContextManager {
         }
         if (taskType) {
           this.current.taskType = taskType;
+        }
+        const turn: DialogueTurn = {
+          turnId: `turn_${this.sequenceNumber}`,
+          sequenceNumber: this.sequenceNumber,
+          speaker: 'meoow',
+          source: source || 'manual',
+          text: conciseSummary,
+          timestamp: event.timestamp,
+          tokenCount: estimateTokens(conciseSummary),
+        };
+        this.recentTurns.push(turn);
+        if (this.recentTurns.length > 20) {
+          this.recentTurns.shift();
         }
         break;
       }
@@ -323,20 +350,20 @@ export class InterviewContextManager {
   /**
    * Add an interviewer spoken question/turn.
    */
-  public addInterviewerTurn(text: string): ContextEvent {
+  public addInterviewerTurn(text: string, source: 'audio' | 'screen' | 'manual' = 'audio'): ContextEvent {
     return this.dispatchInternal({
       type: 'TRANSCRIPT_TURN_ADDED',
-      payload: { speaker: 'interviewer', text: text.trim() },
+      payload: { speaker: 'interviewer', text: text.trim(), source },
     });
   }
 
   /**
    * Add a candidate spoken response turn.
    */
-  public addCandidateTurn(text: string): ContextEvent {
+  public addCandidateTurn(text: string, source: 'audio' | 'screen' | 'manual' = 'audio'): ContextEvent {
     return this.dispatchInternal({
       type: 'TRANSCRIPT_TURN_ADDED',
-      payload: { speaker: 'candidate', text: text.trim() },
+      payload: { speaker: 'candidate', text: text.trim(), source },
     });
   }
 
@@ -408,7 +435,7 @@ export class InterviewContextManager {
     requestId: string,
     baseContextVersion: number,
     answerText: string,
-    metadata?: { taskType?: TaskType; decisions?: string[] }
+    metadata?: { taskType?: TaskType; decisions?: string[]; source?: 'audio' | 'screen' | 'manual' }
   ): ContextEvent {
     return this.dispatchInternal({
       type: 'AI_ANSWER_RECORDED',
@@ -419,6 +446,7 @@ export class InterviewContextManager {
         isStaleCompletion: baseContextVersion < this.contextVersion,
         taskType: metadata?.taskType,
         decisions: metadata?.decisions,
+        source: metadata?.source,
       },
     });
   }
@@ -498,15 +526,23 @@ export class InterviewContextManager {
     }
 
     // 4. Priority 4: RECENT RELEVANT TURNS (reverse chronological until budget exhausted)
-    const recentTurns: Array<{ speaker: 'interviewer' | 'candidate'; text: string }> = [];
+    const recentTurns: Array<{
+      speaker: 'interviewer' | 'candidate' | 'meoow';
+      source?: 'audio' | 'screen' | 'manual';
+      text: string;
+    }> = [];
     for (let i = this.recentTurns.length - 1; i >= 0; i--) {
       const turn = this.recentTurns[i];
       const cost = turn.tokenCount || estimateTokens(turn.text);
-      if (budgetRemaining - cost < 50 && recentTurns.length >= 1) {
-        // Stop adding turns when budget is getting tight, but keep at least 1 turn if possible
+      if (budgetRemaining - cost < 50 && recentTurns.length >= 2) {
+        // Stop adding turns when budget is getting tight, but keep at least 2 turns if possible
         break;
       }
-      recentTurns.unshift({ speaker: turn.speaker, text: turn.text });
+      recentTurns.unshift({
+        speaker: turn.speaker,
+        source: turn.source,
+        text: turn.text,
+      });
       budgetRemaining -= cost;
     }
 
@@ -619,12 +655,16 @@ export class InterviewContextManager {
   /**
    * Convenience alias to record AI answer text.
    */
-  public recordAiAnswer(answerText: string, taskType?: TaskType): ContextEvent {
+  public recordAiAnswer(
+    answerText: string,
+    source: 'audio' | 'screen' | 'manual' = 'manual',
+    taskType?: TaskType
+  ): ContextEvent {
     return this.recordAnswerCompletion(
       `ans_${Date.now()}`,
       this.contextVersion,
       answerText,
-      { taskType }
+      { taskType, source }
     );
   }
 

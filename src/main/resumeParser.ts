@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import pdfParse from "pdf-parse";
+import PDFParser from "pdf2json";
 import mammoth from "mammoth";
 
 export interface ResumeParseResult {
@@ -57,10 +57,101 @@ export function normalizeResumeText(text: string): string {
 }
 
 /**
+ * Spatially-aware page renderer for PDF documents (pdf2json format).
+ * Correctly groups text items into lines and inserts spaces where spatial gaps exist.
+ */
+export function renderPdfPageTexts(page: any): string {
+  const texts = page?.Texts || [];
+  if (!texts || texts.length === 0) return "";
+
+  const items: { x: number; y: number; w: number; str: string }[] = [];
+  for (const t of texts) {
+    if (!t || !t.R) continue;
+    const rawStr = (t.R || []).map((r: any) => {
+      try {
+        return decodeURIComponent(r.T || "");
+      } catch {
+        return unescape(r.T || "");
+      }
+    }).join("");
+
+    if (rawStr.trim().length > 0) {
+      items.push({
+        x: t.x,
+        y: t.y,
+        w: t.w || rawStr.length * 0.5,
+        str: rawStr,
+      });
+    }
+  }
+
+  if (items.length === 0) return "";
+
+  const yTolerance = 0.35;
+  items.sort((a, b) => {
+    const yDiff = a.y - b.y;
+    if (Math.abs(yDiff) > yTolerance) return yDiff;
+    return a.x - b.x;
+  });
+
+  const lines: (typeof items)[] = [];
+  let currentLine: typeof items = [];
+  let currentY: number | null = null;
+
+  for (const item of items) {
+    if (currentY === null) {
+      currentY = item.y;
+      currentLine.push(item);
+    } else if (Math.abs(item.y - currentY) <= yTolerance) {
+      currentLine.push(item);
+    } else {
+      lines.push(currentLine);
+      currentLine = [item];
+      currentY = item.y;
+    }
+  }
+  if (currentLine.length > 0) lines.push(currentLine);
+
+  const lineStrings: string[] = [];
+  for (const line of lines) {
+    line.sort((a, b) => a.x - b.x);
+    let lineText = "";
+    let lastXEnd: number | null = null;
+
+    for (const item of line) {
+      if (lastXEnd !== null) {
+        const gap = item.x - lastXEnd;
+        const needsSpace =
+          gap > 0.15 &&
+          !lineText.endsWith(" ") &&
+          !item.str.startsWith(" ") &&
+          !/^[\.,:;!?\)\}\]]/.test(item.str) &&
+          !/[\(\{\[]$/.test(lineText);
+
+        if (needsSpace) lineText += " ";
+      }
+      lineText += item.str;
+      lastXEnd = item.x + item.w;
+    }
+
+    const trimmed = lineText.trim();
+    if (trimmed) lineStrings.push(trimmed);
+  }
+
+  return lineStrings.join("\n");
+}
+
+/**
  * Spatially-aware page renderer for PDF documents.
  * Correctly groups text items into lines and inserts spaces where spatial gaps exist.
  */
 export async function spatialPageRender(pageData: any): Promise<string> {
+  if (pageData?.Texts) {
+    return renderPdfPageTexts(pageData);
+  }
+
+  if (!pageData?.getTextContent) return "";
+
   const textContent = await pageData.getTextContent({
     normalizeWhitespace: true,
     disableCombineTextItems: false,
@@ -258,32 +349,44 @@ async function parsePdfFile(filePath: string, fileName: string, startTime: numbe
   }
 
   try {
+    const pdfData = await new Promise<any>((resolve, reject) => {
+      const parser = new PDFParser();
+      parser.on("pdfParser_dataError", (errData: any) => {
+        reject(errData?.parserError || new Error(String(errData)));
+      });
+      parser.on("pdfParser_dataReady", (data: any) => {
+        resolve(data);
+      });
+      try {
+        parser.parseBuffer(buffer);
+      } catch (e) {
+        reject(e);
+      }
+    });
+
+    const pages = pdfData?.Pages || [];
+    const pageCount = pages.length || 1;
     let extractedPagesCount = 0;
     const pageTexts: string[] = [];
 
-    const pageRenderTracker = async (pageData: any) => {
+    for (let i = 0; i < pages.length; i++) {
       try {
-        const text = await spatialPageRender(pageData);
-        if (text && text.trim().length > 0) {
+        const pageText = renderPdfPageTexts(pages[i]);
+        if (pageText && pageText.trim().length > 0) {
           extractedPagesCount++;
-          pageTexts.push(text);
-          return text;
+          pageTexts.push(pageText);
         } else {
-          warnings.push(`Page ${pageData.pageIndex + 1} yielded no readable text.`);
-          return "";
+          warnings.push(`Page ${i + 1} yielded no readable text.`);
         }
       } catch (pageErr: any) {
-        warnings.push(`Page ${pageData.pageIndex + 1} render failed: ${pageErr.message}`);
-        return "";
+        warnings.push(`Page ${i + 1} render failed: ${pageErr.message}`);
       }
-    };
+    }
 
-    const pdfData = await pdfParse(buffer, { pagerender: pageRenderTracker });
     const rawText = pageTexts.join("\n\n");
     const normalized = normalizeResumeText(rawText);
     const charCount = normalized.length;
     const wordCount = normalized ? normalized.split(/\s+/).filter(Boolean).length : 0;
-    const pageCount = pdfData.numpages || 1;
     const durationMs = Math.round(performance.now() - startTime);
 
     // Check for empty or scanned PDF

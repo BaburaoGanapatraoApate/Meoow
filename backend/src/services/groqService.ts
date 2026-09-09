@@ -431,9 +431,16 @@ export function formatBoundedContextForPrompt(boundedContext?: any): string {
 
   if (boundedContext.recentTurns?.length > 0) {
     const dialog = boundedContext.recentTurns
-      .map((t: any) => `${t.speaker === "candidate" ? "Candidate" : "Interviewer"}: ${t.text}`)
+      .map((t: any) => {
+        let speakerName = "Interviewer";
+        if (t.speaker === "candidate") speakerName = "Candidate";
+        else if (t.speaker === "meoow") speakerName = "Meoow";
+
+        const sourceTag = t.source ? ` (${t.source})` : "";
+        return `${speakerName}${sourceTag}: ${t.text}`;
+      })
       .join("\n");
-    parts.push(`RECENT CONVERSATION CONTEXT:\n${dialog}`);
+    parts.push(`RECENT CONVERSATION CONTEXT (CHRONOLOGICAL DIALOGUE):\n${dialog}`);
   }
 
   if (boundedContext.stableFacts?.length > 0) {
@@ -574,6 +581,11 @@ CRITICAL SPOKEN-ANSWER-FIRST GUIDELINES:
    - Normal technical / Coding: ~30-60 seconds spoken.
    - Complex ML Design / System Design / Case Study: ~60-120 seconds structured candidate monologue.
 8. STT ROBUSTNESS: Live speech-to-text transcripts may contain minor phonetic misrecognitions of technical terms (e.g. 'state' for 'set', 'sink' for 'sync', 'py torch' for 'PyTorch', 'e c two' for 'EC2'). Intelligently deduce the intended concept and answer directly without commenting on any transcript glitch.
+9. CONVERSATIONAL CONTINUITY & PRIOR QUESTION RECALL:
+   - If the user or interviewer asks about earlier questions, discussion history, or past topics (e.g., "What are the two questions I asked you previously?", "What topic were we discussing?", "What did I ask earlier?"):
+     * Directly inspect the RECENT CONVERSATION CONTEXT (CHRONOLOGICAL DIALOGUE) below.
+     * Accurately name, list, or enumerate the specific earlier questions asked by the candidate or interviewer as recorded in the chronological dialogue.
+     * NEVER state that you have no earlier questions or context if prior questions are present in the chronological dialogue.
 
 ==================================================
 CURRENT INTERVIEW TASK: ${effectiveTaskType}${effectiveParentTaskType ? ` (Follow-up to ${effectiveParentTaskType})` : ""}

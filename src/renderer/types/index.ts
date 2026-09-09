@@ -356,7 +356,8 @@ export interface CompactScreenObservation {
 export interface DialogueTurn {
   turnId: string;
   sequenceNumber: number;
-  speaker: 'interviewer' | 'candidate';
+  speaker: 'interviewer' | 'candidate' | 'meoow';
+  source?: 'audio' | 'screen' | 'manual';
   text: string;
   timestamp: string;
   tokenCount: number;
@@ -448,7 +449,11 @@ export interface BoundedContextPayload {
     entities: string[];
     codeSnippet: string | null;
   } | null;
-  recentTurns: Array<{ speaker: 'interviewer' | 'candidate'; text: string }>;
+  recentTurns: Array<{
+    speaker: 'interviewer' | 'candidate' | 'meoow';
+    source?: 'audio' | 'screen' | 'manual';
+    text: string;
+  }>;
   stableFacts: string[];
   summary: string | null;
   candidateProfile: {
