@@ -163,7 +163,13 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
     const groqApiKey = await resolveGroqCredential(userId);
 
     // 6. Execute Stream (Vision or Chat)
-    let result: { fullAnswer: string; modelUsed: string };
+    let result: {
+      fullAnswer: string;
+      modelUsed: string;
+      isError?: boolean;
+      errorCode?: string;
+      retryAfterSeconds?: number;
+    };
 
     if (imageBase64) {
       result = await groqBackendService.streamScreenAnalysis(
@@ -174,6 +180,8 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
           apiKey: groqApiKey,
           sessionContext,
           signal: abortController.signal,
+          requestId: reqId,
+          activeStreamsCount: activeUserStreams.get(userId) || 1,
         },
         (chunkText) => {
           sendSSE({
@@ -217,6 +225,14 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
 
     // 6. Finalize Credit Consumption & Send Done Event
     isCompleted = true;
+    if (result.isError && reservation?.transactionId) {
+      try {
+        await refundCredit(userId, reservation.transactionId, result.fullAnswer);
+      } catch (refundErr) {
+        console.error("[GroqRouter] Failed to refund credit on error notice:", refundErr);
+      }
+    }
+
     sendSSE({
       type: "done",
       requestId: reqId,
@@ -224,6 +240,9 @@ router.post("/groq/chat", async (req: AuthenticatedRequest, res: Response) => {
       timestamp: new Date().toISOString(),
       source,
       model: result.modelUsed,
+      isError: result.isError,
+      errorCode: result.errorCode,
+      retryAfterSeconds: result.retryAfterSeconds,
     });
 
     releaseConcurrencySlot();

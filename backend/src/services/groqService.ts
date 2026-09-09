@@ -17,6 +17,13 @@ export const ALLOWED_MODELS = [
 export const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 export const FALLBACK_MODEL = "qwen/qwen3.8-27b";
 
+export const DEFAULT_VISION_MODEL = "qwen/qwen3.6-27b";
+export const FALLBACK_VISION_MODEL = "qwen/qwen3.8-27b";
+export const ALLOWED_VISION_MODELS = [
+  "qwen/qwen3.6-27b",
+  "qwen/qwen3.8-27b",
+];
+
 export interface SessionContextData {
   sessionId?: string;
   jobTitle?: string;
@@ -28,6 +35,8 @@ export interface SessionContextData {
   interview_round?: string;
   streamingModel?: string;
   streaming_model?: string;
+  visionModel?: string;
+  vision_model?: string;
   notes?: string;
   resumeText?: string;
   resume_text?: string;
@@ -52,6 +61,16 @@ export interface ScreenAnalysisOptions {
   sessionContext?: SessionContextData;
   signal?: AbortSignal;
   onChunk?: (chunkText: string) => void;
+  requestId?: string;
+  activeStreamsCount?: number;
+}
+
+export interface ScreenAnalysisResult {
+  fullAnswer: string;
+  modelUsed: string;
+  isError?: boolean;
+  errorCode?: string;
+  retryAfterSeconds?: number;
 }
 
 export class GroqBackendService {
@@ -89,6 +108,13 @@ export class GroqBackendService {
     if (!requestedModel) return DEFAULT_MODEL;
     if (ALLOWED_MODELS.includes(requestedModel)) return requestedModel;
     return DEFAULT_MODEL;
+  }
+
+  public resolveVisionModel(requestedModel?: string): string {
+    if (requestedModel && ALLOWED_VISION_MODELS.includes(requestedModel)) {
+      return requestedModel;
+    }
+    return DEFAULT_VISION_MODEL;
   }
 
   public buildSystemPrompt(context?: SessionContextData): string {
@@ -203,7 +229,7 @@ MANDATORY RULES:
         {
           model: targetModel,
           messages: fullMessages,
-          max_tokens: 450,
+          max_tokens: 1024,
           temperature: 0.55,
           stream: true,
         },
@@ -220,7 +246,7 @@ MANDATORY RULES:
           {
             model: FALLBACK_MODEL,
             messages: fullMessages,
-            max_tokens: 350,
+            max_tokens: 800,
             temperature: 0.6,
             stream: true,
           },
@@ -244,62 +270,280 @@ MANDATORY RULES:
   }
 
   /**
-   * Stream screen / vision analysis from Groq API.
+   * Stream screen / vision analysis from Groq API with 429 fallback and accurate diagnostics.
    */
   public async streamScreenAnalysis(
     options: ScreenAnalysisOptions,
     onChunk: (chunk: string) => void
-  ): Promise<{ fullAnswer: string; modelUsed: string }> {
+  ): Promise<ScreenAnalysisResult> {
     const client = this.getClient(options.apiKey);
 
-    const targetModel = options.model || "llama-3.2-11b-vision-preview";
+    const primaryModel = this.resolveVisionModel(options.model);
+    const fallbackModel = primaryModel === DEFAULT_VISION_MODEL ? FALLBACK_VISION_MODEL : null;
+
     const questionText =
       options.question ||
-      "Analyze what is shown on this screen and provide key technical insights or interview answers.";
+      "You are an expert technical interview co-pilot assisting the candidate in real time.\n" +
+      "TASK:\n" +
+      "1. Identify the exact interview question, coding problem, multiple choice question (MCQ), or system design challenge visible on this screen.\n" +
+      "2. DIRECT ANSWER FIRST: Provide the immediate, actionable solution, correct MCQ option, or optimal code immediately.\n" +
+      "CRITICAL RULES:\n" +
+      "- DO NOT describe the screenshot, IDE layout, window borders, or UI elements.\n" +
+      "- DO NOT say 'In this screenshot I see...' or 'The screen displays...'.\n" +
+      "- If a coding problem: give a 1-sentence approach then the optimal, complete solution code with time/space complexity.\n" +
+      "- If an MCQ: state the correct option letter/text clearly and explain why in 1-2 sentences.\n" +
+      "- If terminal or code error: state the exact fix immediately.\n" +
+      "- If a question is highlighted or asked by an interviewer, answer that question directly.";
 
-    try {
-      const stream = await client.chat.completions.create(
-        {
-          model: targetModel,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: questionText },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:image/jpeg;base64,${options.imageBase64}`,
-                  },
-                },
-              ] as any,
-            },
-          ],
-          max_tokens: 350,
-          stream: true,
-        },
-        { signal: options.signal }
+    const logErrorDiagnostics = (err: any, attemptedModel: string) => {
+      try {
+        const imageBytes = Buffer.byteLength(options.imageBase64, "base64");
+        const imageMB = (imageBytes / (1024 * 1024)).toFixed(2);
+        const status = err.status || err.statusCode || err.response?.status;
+        const code = err.code || err.error?.code || err.type || "UNKNOWN";
+        const message = err.message || err.error?.message || String(err);
+
+        console.error("[GroqVisionDiagnostic] ========================================");
+        console.error(`[GroqVisionDiagnostic] Timestamp: ${new Date().toISOString()}`);
+        console.error(`[GroqVisionDiagnostic] Request ID: ${options.requestId || "none"}`);
+        console.error(`[GroqVisionDiagnostic] Attempted Model: ${attemptedModel}`);
+        console.error(`[GroqVisionDiagnostic] HTTP Status: ${status ?? "N/A"}`);
+        console.error(`[GroqVisionDiagnostic] Error Code: ${code}`);
+        console.error(`[GroqVisionDiagnostic] Error Message: ${message}`);
+        console.error(`[GroqVisionDiagnostic] Image Payload: ${imageBytes} bytes (~${imageMB} MB)`);
+        console.error(`[GroqVisionDiagnostic] Active Streams: ${options.activeStreamsCount ?? "N/A"}`);
+        console.error("[GroqVisionDiagnostic] ========================================");
+      } catch (logErr) {
+        console.error("[GroqVisionDiagnostic] Failed to format diagnostic log:", logErr);
+      }
+    };
+
+    const isRateLimitError = (err: any): boolean => {
+      const status = err.status || err.statusCode || err.response?.status;
+      const code = err.code || err.error?.code || err.type;
+      const msg = (err.message || err.error?.message || "").toLowerCase();
+      return (
+        status === 429 ||
+        code === "rate_limit_exceeded" ||
+        code === "tokens" ||
+        msg.includes("rate limit") ||
+        msg.includes("tokens per minute") ||
+        msg.includes("itpm")
       );
+    };
+
+    const extractRetrySeconds = (err: any): number => {
+      try {
+        const msg = err.message || err.error?.message || "";
+        const match = msg.match(/try again in ([\d\.]+)\s*(ms|s|m|seconds?|minutes?)/i);
+        if (match) {
+          const val = parseFloat(match[1]);
+          const unit = match[2].toLowerCase();
+          if (unit.startsWith("ms")) return Math.max(1, Math.ceil(val / 1000));
+          if (unit.startsWith("m") && !unit.startsWith("ms")) return Math.max(1, Math.ceil(val * 60));
+          return Math.max(1, Math.ceil(val));
+        }
+
+        const resetHeader = err.headers?.["x-ratelimit-reset-tokens"] || err.headers?.["retry-after"];
+        if (resetHeader) {
+          const headerStr = String(resetHeader).trim();
+          const secMatch = headerStr.match(/([\d\.]+)\s*s/i);
+          if (secMatch) return Math.max(1, Math.ceil(parseFloat(secMatch[1])));
+          const minMatch = headerStr.match(/(\d+)m\s*([\d\.]+)s/i);
+          if (minMatch) return Math.max(1, parseInt(minMatch[1], 10) * 60 + Math.ceil(parseFloat(minMatch[2])));
+          const num = parseFloat(headerStr);
+          if (!isNaN(num)) return Math.max(1, Math.ceil(num));
+        }
+      } catch {}
+      return 20; // safe default cooldown
+    };
+
+    const executeStream = async (targetModel: string): Promise<{ fullAnswer: string; modelUsed: string }> => {
+      const isQwen36 = targetModel.includes("qwen3.6");
+      const maxTokens = isQwen36 ? 800 : 1024;
+
+      const streamParams: any = {
+        model: targetModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: questionText },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${options.imageBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: maxTokens,
+        stream: true,
+      };
+
+      const stream: any = await client.chat.completions.create(streamParams, {
+        signal: options.signal,
+      });
 
       let fullAnswer = "";
+      let inThinkBlock = false;
+      let buffer = "";
+
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) {
+        const delta = chunk.choices[0]?.delta?.content || "";
+        if (!delta) continue;
+
+        if (!isQwen36) {
           fullAnswer += delta;
           onChunk(delta);
+          continue;
+        }
+
+        // For Qwen 3.6, strip internal <think> ... </think> tags
+        buffer += delta;
+
+        while (buffer.length > 0) {
+          if (!inThinkBlock) {
+            const thinkStart = buffer.indexOf("<think>");
+            if (thinkStart !== -1) {
+              if (thinkStart > 0) {
+                const text = buffer.slice(0, thinkStart);
+                fullAnswer += text;
+                onChunk(text);
+              }
+              inThinkBlock = true;
+              buffer = buffer.slice(thinkStart + 7);
+            } else {
+              let hasPartial = false;
+              for (let len = Math.min(buffer.length, 6); len > 0; len--) {
+                if ("<think>".startsWith(buffer.slice(-len))) {
+                  const safe = buffer.slice(0, -len);
+                  if (safe) {
+                    fullAnswer += safe;
+                    onChunk(safe);
+                  }
+                  buffer = buffer.slice(-len);
+                  hasPartial = true;
+                  break;
+                }
+              }
+              if (!hasPartial) {
+                fullAnswer += buffer;
+                onChunk(buffer);
+                buffer = "";
+              } else {
+                break;
+              }
+            }
+          } else {
+            const thinkEnd = buffer.indexOf("</think>");
+            if (thinkEnd !== -1) {
+              inThinkBlock = false;
+              buffer = buffer.slice(thinkEnd + 8).replace(/^\s+/, "");
+            } else {
+              buffer = "";
+            }
+          }
         }
       }
 
-      return { fullAnswer, modelUsed: targetModel };
+      if (buffer && !inThinkBlock) {
+        fullAnswer += buffer;
+        onChunk(buffer);
+      }
+
+      return { fullAnswer: fullAnswer.trim(), modelUsed: targetModel };
+    };
+
+    let lastError: any = null;
+
+    // 1. Attempt Primary Vision Model
+    try {
+      const primaryRes = await executeStream(primaryModel);
+      if (primaryRes.fullAnswer && primaryRes.fullAnswer.length > 0) {
+        return primaryRes;
+      }
+      console.warn(
+        `[GroqVision] Primary vision model '${primaryModel}' yielded empty content. Falling back to '${fallbackModel}'...`
+      );
+      if (fallbackModel) {
+        return await executeStream(fallbackModel);
+      }
+      return primaryRes;
     } catch (err: any) {
-      // Graceful fallback notice for models/keys without vision support
-      const notice =
-        "*(Screen captured)* Screen analysis requires a vision-enabled model on your Groq project. Use voice or manual questions for instant answers.";
-      onChunk(notice);
-      return { fullAnswer: notice, modelUsed: "fallback-notice" };
+      lastError = err;
+      logErrorDiagnostics(err, primaryModel);
+
+      // 2. If 429 Rate Limit, attempt Fallback Vision Model ONCE
+      if (isRateLimitError(err) && fallbackModel) {
+        console.warn(
+          `[GroqVision] Primary vision model '${primaryModel}' hit rate limit (429). Attempting fallback to '${fallbackModel}'...`
+        );
+        try {
+          return await executeStream(fallbackModel);
+        } catch (fallbackErr: any) {
+          lastError = fallbackErr;
+          logErrorDiagnostics(fallbackErr, fallbackModel);
+        }
+      }
     }
+
+    // 3. Classify and handle error accurately
+    const is429 = isRateLimitError(lastError);
+    const retrySeconds = is429 ? extractRetrySeconds(lastError) : undefined;
+    const status = lastError?.status || lastError?.statusCode || lastError?.response?.status;
+    const code = lastError?.code || lastError?.error?.code || lastError?.type;
+    const msg = (lastError?.message || lastError?.error?.message || "").toLowerCase();
+
+    let errorCode = "AI_PROVIDER_ERROR";
+    let notice = "*(Screen captured)* Screen analysis failed. Please try again.";
+
+    if (is429) {
+      errorCode = "RATE_LIMIT_EXCEEDED";
+      notice = `*(Screen captured)* Screen analysis is temporarily rate-limited. Please try again in ~${retrySeconds} seconds.`;
+    } else if (
+      status === 413 ||
+      msg.includes("payload too large") ||
+      msg.includes("too large") ||
+      msg.includes("invalid image data")
+    ) {
+      errorCode = "IMAGE_TOO_LARGE";
+      notice = "*(Screen captured)* Screenshot payload is too large or invalid. Please try capturing again.";
+    } else if (
+      code === "model_decommissioned" ||
+      code === "model_not_found" ||
+      msg.includes("multimodal") ||
+      msg.includes("does not support") ||
+      msg.includes("decommissioned")
+    ) {
+      errorCode = "MODEL_CONFIGURATION_ERROR";
+      notice = "*(Screen captured)* Screen vision model is unavailable or misconfigured. Please verify model settings.";
+    } else if (status === 401 || status === 403 || code === "invalid_api_key") {
+      errorCode = "AI_AUTH_ERROR";
+      notice = "*(Screen captured)* Groq authentication error. Please verify your Groq API credentials.";
+    } else if (
+      lastError?.name === "AbortError" ||
+      code === "ETIMEDOUT" ||
+      status === 408 ||
+      msg.includes("timeout")
+    ) {
+      errorCode = "AI_TIMEOUT";
+      notice = "*(Screen captured)* Screen analysis timed out. Please try again.";
+    } else if (status >= 500) {
+      errorCode = "AI_PROVIDER_ERROR";
+      notice = "*(Screen captured)* Groq service error. Please try again in a moment.";
+    }
+
+    onChunk(notice);
+    return {
+      fullAnswer: notice,
+      modelUsed: "error-notice",
+      isError: true,
+      errorCode,
+      retryAfterSeconds: retrySeconds,
+    };
   }
 }
 
 export const groqBackendService = new GroqBackendService();
-

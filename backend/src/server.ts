@@ -59,14 +59,22 @@ const allowedOrigins = [
         "http://127.0.0.1:4000",
       ]
     : []),
+  "file://",
+  "vscode-file://",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:4000",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:4000",
 ].filter(Boolean) as string[];
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow non-browser clients (Electron desktop background fetch, curl, server-to-server)
-      // and packaged Electron renderer fetch requests where Origin is "null"
-      if (!origin || origin === "null") {
+      // and packaged Electron renderer fetch requests where Origin is "null", "file://", etc.
+      if (!origin || origin === "null" || origin === "file://" || origin.startsWith("vscode-file://")) {
         return callback(null, true);
       }
 
@@ -75,8 +83,8 @@ app.use(
         return callback(null, true);
       }
 
-      // In development, allow localhost/127.0.0.1 on any port
-      if (!isProduction && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      // Allow localhost/127.0.0.1 on any port for desktop co-pilot / local testing
+      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
         return callback(null, true);
       }
 
