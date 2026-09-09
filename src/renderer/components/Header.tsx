@@ -7,6 +7,14 @@ import { PurchaseCreditsModal } from './PurchaseCreditsModal';
 import { AdminDashboardModal } from './admin/AdminDashboardModal';
 import logoImg from '../assets/logo.png';
 
+export function formatCooldown(sec: number): string {
+  if (!sec || sec <= 0) return '0s';
+  if (sec <= 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
 interface HeaderProps {
   onStart?: () => void;
   isShowingSetup?: boolean;
@@ -339,11 +347,12 @@ export default function Header({
   return (
     <header className="header" data-window-interactive="true">
       <div className="header-container">
+        {/* LEFT BRAND GROUP: [Meoow logo] [credits] [Buy] */}
         <div className="header-left">
-          <img src={logoImg} alt="Meoow" className="logo" />
-          <span className="app-title">Meoow</span>
-        </div>
-        <div className="header-right">
+          <div className="brand-group">
+            <img src={logoImg} alt="Meoow" className="logo" />
+            <span className="app-title">Meoow</span>
+          </div>
           {/* Credits Badge & Purchase Trigger */}
           {user && (
             zeroCreditCountdown !== null && zeroCreditCountdown !== undefined ? (
@@ -372,6 +381,10 @@ export default function Header({
               </button>
             )
           )}
+        </div>
+
+        {/* MIDDLE CONTROLS: Connected, timer, Auto Answer, Language */}
+        <div className="header-center">
           {renderConnectionStatus()}
           {renderDurationIndicator()}
           {renderQueueIndicator()}
@@ -389,7 +402,10 @@ export default function Header({
               </select>
             </>
           )}
+        </div>
 
+        {/* RIGHT ACTIONS: mic, Analyze, End, menu */}
+        <div className="header-right">
           {isSessionStarted ? (
             <div className="session-controls" data-window-interactive="true">
               <button
@@ -417,7 +433,7 @@ export default function Header({
                 style={isAnalyzing || analyzeCooldown > 0 ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
                 title={
                   analyzeCooldown > 0
-                    ? `Rate limited. Retry in ~${analyzeCooldown}s`
+                    ? `Rate limited. Retry in ~${formatCooldown(analyzeCooldown)}`
                     : isAnalyzing
                     ? 'Analyzing Screen...'
                     : 'Analyze Screen (Ctrl+Shift+A)'
@@ -428,7 +444,7 @@ export default function Header({
                   <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z" />
                   <path d="M20.054 15.987H3.946" />
                 </svg>
-                {analyzeCooldown > 0 ? `Retry (${analyzeCooldown}s)` : isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                {analyzeCooldown > 0 ? `Retry (${formatCooldown(analyzeCooldown)})` : isAnalyzing ? 'Analyzing...' : 'Analyze'}
               </button>
               <button
                 type="button"

@@ -172,9 +172,26 @@ export interface ResumeFile {
 }
 
 export interface ResumeParseResult {
-  filePath: string;
+  success: boolean;
+  format: 'pdf' | 'docx' | 'txt' | 'unknown';
+  pageCount: number;
+  extractedPages: number;
+  extractedChars: number;
   text: string;
   fileName: string;
+  filePath: string;
+  warnings: string[];
+  errorCode?:
+    | 'FILE_NOT_FOUND'
+    | 'FILE_EMPTY'
+    | 'UNSUPPORTED_FORMAT'
+    | 'PDF_EMPTY_TEXT'
+    | 'PDF_SCANNED_NO_TEXT'
+    | 'PDF_PARTIAL_EXTRACTION'
+    | 'PDF_PARSE_ERROR'
+    | 'DOCX_PARSE_ERROR'
+    | 'TXT_READ_ERROR';
+  errorMessage?: string;
 }
 
 // ─── Update State ───
@@ -244,7 +261,7 @@ export interface MeowAPI {
   getApiKeyStatus(): Promise<ApiKeyStatus>;
   startAudioCapture(): Promise<boolean>;
   stopAudioCapture(): Promise<boolean>;
-  parseResumeLocal(filePath: string): Promise<{ text: string }>;
+  parseResumeLocal(filePath: string): Promise<ResumeParseResult>;
   pickResumeFile(): Promise<ResumeParseResult | null>;
   getAuthToken(): Promise<string | null>;
   setAuthToken(token: string): Promise<boolean>;

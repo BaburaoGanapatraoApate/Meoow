@@ -107,8 +107,149 @@ export interface ScreenAnalysisResult {
   chunkCount?: number;
   durationMs?: number;
 }
+export const MAX_SAFE_COOLDOWN_SECONDS = 86400; // 24-hour upper sanity limit against corrupt headers
+export const DEFAULT_SAFE_COOLDOWN_SECONDS = 20;
 
+export interface RetryExtractionResult {
+  seconds: number;
+  source: "retry-after" | "x-ratelimit-reset-tokens" | "x-ratelimit-reset-requests" | "error-message" | "fallback-default";
+  rawValue: string | null;
+}
 
+/**
+ * Robust duration parser for rate-limit reset strings.
+ * Supports: pure seconds ("19"), milliseconds ("134ms"), and composite strings ("7.66s", "1m 12.5s", "1h 45m 7.2s").
+ */
+export function parseDurationString(str: string): number | null {
+  if (!str || typeof str !== "string") return null;
+  const trimmed = str.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  // 1. Pure positive number in seconds (e.g. "19", "19.5")
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const n = parseFloat(trimmed);
+    return isFinite(n) && n > 0 ? n : null;
+  }
+
+  // 2. Pure milliseconds (e.g. "134ms", "500ms")
+  const msMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*ms$/);
+  if (msMatch) {
+    const ms = parseFloat(msMatch[1]);
+    return isFinite(ms) && ms > 0 ? ms / 1000 : null;
+  }
+
+  // 3. Composite or unit-suffixed duration: hours, minutes, seconds, milliseconds
+  const compRegex = /^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m(?!s))?\s*(?:(\d+(?:\.\d+)?)\s*s)?\s*(?:(\d+(?:\.\d+)?)\s*ms)?$/;
+  const match = trimmed.match(compRegex);
+  if (match && (match[1] !== undefined || match[2] !== undefined || match[3] !== undefined || match[4] !== undefined)) {
+    const h = match[1] ? parseFloat(match[1]) : 0;
+    const m = match[2] ? parseFloat(match[2]) : 0;
+    const s = match[3] ? parseFloat(match[3]) : 0;
+    const ms = match[4] ? parseFloat(match[4]) : 0;
+
+    if ([h, m, s, ms].some((v) => !isFinite(v) || v < 0)) return null;
+    const totalSeconds = h * 3600 + m * 60 + s + ms / 1000;
+    return totalSeconds > 0 ? totalSeconds : null;
+  }
+
+  return null;
+}
+
+/**
+ * Extract retry cooldown in seconds with precedence:
+ * 1. retry-after header (seconds)
+ * 2. x-ratelimit-reset-tokens header (duration)
+ * 3. x-ratelimit-reset-requests header (duration)
+ * 4. Error message "try again in <duration>"
+ * 5. Safe bounded default fallback (20s)
+ */
+export function extractRetrySeconds(err: any, requestId?: string): RetryExtractionResult {
+  try {
+    const headers = err?.headers || err?.response?.headers;
+
+    const getHeader = (name: string): string | undefined => {
+      if (!headers) return undefined;
+      if (typeof headers.get === "function") {
+        const val = headers.get(name);
+        if (val !== null && val !== undefined) return String(val);
+      }
+      const lower = name.toLowerCase();
+      for (const k of Object.keys(headers)) {
+        if (k.toLowerCase() === lower) {
+          const val = headers[k];
+          if (val !== null && val !== undefined) return String(val);
+        }
+      }
+      return undefined;
+    };
+
+    // 1. Prefer server-provided retry-after on actual 429
+    const rawRetryAfter = getHeader("retry-after");
+    if (rawRetryAfter) {
+      const parsed = parseDurationString(rawRetryAfter);
+      if (parsed !== null && parsed > 0) {
+        const rounded = Math.ceil(parsed);
+        const capped = Math.min(MAX_SAFE_COOLDOWN_SECONDS, Math.max(1, rounded));
+        console.log(
+          `[RateLimitCooldown] req=${requestId || "unknown"} source=retry-after raw="${rawRetryAfter}" parsed=${parsed}s capped=${capped}s`
+        );
+        return { seconds: capped, source: "retry-after", rawValue: rawRetryAfter };
+      }
+    }
+
+    // 2. Parse x-ratelimit-reset-tokens duration
+    const rawResetTokens = getHeader("x-ratelimit-reset-tokens");
+    if (rawResetTokens) {
+      const parsed = parseDurationString(rawResetTokens);
+      if (parsed !== null && parsed > 0) {
+        const rounded = Math.ceil(parsed);
+        const capped = Math.min(MAX_SAFE_COOLDOWN_SECONDS, Math.max(1, rounded));
+        console.log(
+          `[RateLimitCooldown] req=${requestId || "unknown"} source=x-ratelimit-reset-tokens raw="${rawResetTokens}" parsed=${parsed}s capped=${capped}s`
+        );
+        return { seconds: capped, source: "x-ratelimit-reset-tokens", rawValue: rawResetTokens };
+      }
+    }
+
+    // 3. Parse x-ratelimit-reset-requests duration
+    const rawResetRequests = getHeader("x-ratelimit-reset-requests");
+    if (rawResetRequests) {
+      const parsed = parseDurationString(rawResetRequests);
+      if (parsed !== null && parsed > 0) {
+        const rounded = Math.ceil(parsed);
+        const capped = Math.min(MAX_SAFE_COOLDOWN_SECONDS, Math.max(1, rounded));
+        console.log(
+          `[RateLimitCooldown] req=${requestId || "unknown"} source=x-ratelimit-reset-requests raw="${rawResetRequests}" parsed=${parsed}s capped=${capped}s`
+        );
+        return { seconds: capped, source: "x-ratelimit-reset-requests", rawValue: rawResetRequests };
+      }
+    }
+
+    // 4. Parse explicit "try again in <duration>" from error message with validation
+    const msg = err?.message || err?.error?.message || "";
+    const tryAgainMatch = msg.match(/try again in\s+([0-9a-z\s\.]+?)(?:\.\s|\.$|\s+need|\s+please|$)/i);
+    if (tryAgainMatch && tryAgainMatch[1]) {
+      const rawMsgDuration = tryAgainMatch[1].trim();
+      const parsed = parseDurationString(rawMsgDuration);
+      if (parsed !== null && parsed > 0) {
+        const rounded = Math.ceil(parsed);
+        const capped = Math.min(MAX_SAFE_COOLDOWN_SECONDS, Math.max(1, rounded));
+        console.log(
+          `[RateLimitCooldown] req=${requestId || "unknown"} source=error-message raw="${rawMsgDuration}" parsed=${parsed}s capped=${capped}s`
+        );
+        return { seconds: capped, source: "error-message", rawValue: rawMsgDuration };
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[RateLimitCooldown] Failed to extract retry cooldown: ${err?.message}`);
+  }
+
+  // Safe bounded fallback
+  console.log(
+    `[RateLimitCooldown] req=${requestId || "unknown"} source=fallback-default raw=null parsed=${DEFAULT_SAFE_COOLDOWN_SECONDS}s capped=${DEFAULT_SAFE_COOLDOWN_SECONDS}s`
+  );
+  return { seconds: DEFAULT_SAFE_COOLDOWN_SECONDS, source: "fallback-default", rawValue: null };
+}
 
 /**
  * Return specific interview answer strategy instructions for a given task type.
@@ -748,30 +889,9 @@ RULES:
       );
     };
 
-    const extractRetrySeconds = (err: any): number => {
-      try {
-        const msg = err.message || err.error?.message || "";
-        const match = msg.match(/try again in ([\d\.]+)\s*(ms|s|m|seconds?|minutes?)/i);
-        if (match) {
-          const val = parseFloat(match[1]);
-          const unit = match[2].toLowerCase();
-          if (unit.startsWith("ms")) return Math.max(1, Math.ceil(val / 1000));
-          if (unit.startsWith("m") && !unit.startsWith("ms")) return Math.max(1, Math.ceil(val * 60));
-          return Math.max(1, Math.ceil(val));
-        }
-
-        const resetHeader = err.headers?.["x-ratelimit-reset-tokens"] || err.headers?.["retry-after"];
-        if (resetHeader) {
-          const headerStr = String(resetHeader).trim();
-          const secMatch = headerStr.match(/([\d\.]+)\s*s/i);
-          if (secMatch) return Math.max(1, Math.ceil(parseFloat(secMatch[1])));
-          const minMatch = headerStr.match(/(\d+)m\s*([\d\.]+)s/i);
-          if (minMatch) return Math.max(1, parseInt(minMatch[1], 10) * 60 + Math.ceil(parseFloat(minMatch[2])));
-          const num = parseFloat(headerStr);
-          if (!isNaN(num)) return Math.max(1, Math.ceil(num));
-        }
-      } catch {}
-      return 20; // safe default cooldown
+    const extractRetrySecondsInternal = (err: any): number => {
+      const parsed = extractRetrySeconds(err, options.requestId);
+      return parsed.seconds;
     };
 
     const executeStream = async (targetModel: string): Promise<ScreenAnalysisResult> => {
@@ -937,7 +1057,8 @@ RULES:
 
     // 3. Classify and handle error accurately
     const is429 = isRateLimitError(lastError);
-    const retrySeconds = is429 ? extractRetrySeconds(lastError) : undefined;
+    const retryResult = is429 ? extractRetrySeconds(lastError, options.requestId) : undefined;
+    const retrySeconds = retryResult?.seconds;
     const status = lastError?.status || lastError?.statusCode || lastError?.response?.status;
     const code = lastError?.code || lastError?.error?.code || lastError?.type;
     const msg = (lastError?.message || lastError?.error?.message || "").toLowerCase();

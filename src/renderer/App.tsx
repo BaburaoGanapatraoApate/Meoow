@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Header from './components/Header';
+import Header, { formatCooldown } from './components/Header';
 import { SessionSetup } from './components/SessionSetup';
 import { AnswersPanel } from './components/AnswersPanel';
 import { TranscriptPanel } from './components/TranscriptPanel';
@@ -501,7 +501,7 @@ function MeowApp() {
     const cleanup = window.meow?.onAnalyzeScreenShortcut?.(() => {
       if (isSessionStarted) {
         if (analyzeCooldownRef.current > 0) {
-          toast.info(`Screen analysis is rate-limited. Please wait ~${analyzeCooldownRef.current}s.`);
+          toast.info(`Screen analysis is rate-limited. Please wait ~${formatCooldown(analyzeCooldownRef.current)}.`);
           return;
         }
         analyzeScreen();
@@ -742,7 +742,7 @@ function MeowApp() {
             }
 
             if (answer.errorCode === 'RATE_LIMIT_EXCEEDED' && answer.retryAfterSeconds) {
-              const seconds = Math.max(1, Math.ceil(answer.retryAfterSeconds));
+              const seconds = Math.max(1, Math.min(86400, Math.ceil(answer.retryAfterSeconds)));
               setAnalyzeCooldown(seconds);
               analyzeCooldownRef.current = seconds;
             }
@@ -895,7 +895,7 @@ function MeowApp() {
   const analyzeScreen = async () => {
     if (isAnalyzingScreenRef.current || analyzeCooldownRef.current > 0) {
       if (analyzeCooldownRef.current > 0) {
-        toast.info(`Screen analysis is rate-limited. Please wait ~${analyzeCooldownRef.current}s.`);
+        toast.info(`Screen analysis is rate-limited. Please wait ~${formatCooldown(analyzeCooldownRef.current)}.`);
       }
       return;
     }

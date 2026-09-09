@@ -214,14 +214,29 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
     try {
       const result = await window.meow.pickResumeFile();
       if (result) {
+        if (!result.success) {
+          const msg = result.errorMessage || 'Failed to extract readable text from resume.';
+          setResumeError(msg);
+          toast.error(msg);
+          return;
+        }
+
         setConfig(prev => ({
           ...prev,
           resume_file_path: result.filePath || '',
           resume_text: result.text || '',
         }));
+
+        if (result.warnings && result.warnings.length > 0) {
+          toast.warning(result.warnings[0]);
+        } else {
+          toast.success(`Resume loaded (${result.extractedChars} characters)`);
+        }
       }
     } catch (err: any) {
-      setResumeError(err.message || 'Failed to parse resume');
+      const msg = err.message || 'Failed to parse resume';
+      setResumeError(msg);
+      toast.error(msg);
     } finally {
       setIsParsingResume(false);
     }

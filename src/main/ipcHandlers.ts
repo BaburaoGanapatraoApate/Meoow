@@ -298,9 +298,11 @@ export function registerIpcHandlers(
       
       if (!result.canceled && result.filePaths.length > 0) {
         const filePath = result.filePaths[0];
-        const text = await parseResume(filePath);
-        console.log(`[Meow] Picked resume: ${filePath}, parsed ${text?.length ?? 0} chars`);
-        return { filePath, text };
+        const parseResult = await parseResume(filePath);
+        console.log(
+          `[Meow] Picked resume: ${path.basename(filePath)} format=${parseResult.format} chars=${parseResult.extractedChars} success=${parseResult.success}`
+        );
+        return parseResult;
       }
       return null;
     } catch (err: any) {
