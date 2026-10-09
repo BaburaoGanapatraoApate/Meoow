@@ -1435,6 +1435,37 @@
   font-size: clamp(1.1rem, 2.8vw, 1.8rem);
   font-weight: 750;
   line-height: 1.35;
+  white-space: pre-line;
+}
+
+.mcq-assistant-answer span {
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.mcq-incomplete-notification {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fef08a;
+  text-align: left;
+}
+
+.mcq-incomplete-badge {
+  background: rgba(234, 179, 8, 0.3);
+  color: #fef08a;
+  font-weight: 800;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  letter-spacing: 0.05em;
+  flex: none;
 }
 
 .mcq-assistant-loader {

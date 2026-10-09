@@ -366,6 +366,7 @@ export interface MeowAPI {
     appVersion: string;
   }>;
   openRazorpayCheckout(options: any): Promise<{ success: boolean; data?: any; error?: string; dismissed?: boolean }>;
+  getMcqShortcuts(): Promise<{ multiCapture: string | null; addCapture: string; finishCapture: string | null }>;
 
   // Send
   quitApp(): void;
@@ -381,6 +382,7 @@ export interface MeowAPI {
   onProtectionSupported(cb: (supported: boolean) => void): () => void;
   onScreenPermissionStatus(cb: (hasPermission: boolean) => void): () => void;
   onAnalyzeScreenShortcut(cb: () => void): () => void;
+  onStartMcqMultiCaptureShortcut(cb: () => void): () => void;
   onFinishMcqCaptureShortcut(cb: () => void): () => void;
   onAudioData(cb: (data: number[]) => void): () => void;
   onAudioCaptureStarted(cb: () => void): () => void;

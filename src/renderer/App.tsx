@@ -109,6 +109,7 @@ function MeowApp() {
   const [mcqAssistantConfig, setMcqAssistantConfig] = useState<McqAssistantConfig | null>(null);
   const [mcqAssistantStatus, setMcqAssistantStatus] = useState<'ready' | 'processing' | 'answer-ready' | 'error'>('ready');
   const [mcqAssistantAnswer, setMcqAssistantAnswer] = useState('');
+  const [mcqIncompleteNotification, setMcqIncompleteNotification] = useState('');
   const [isMultiCaptureActive, setIsMultiCaptureActive] = useState(false);
   const [mcqCaptures, setMcqCaptures] = useState<McqCapture[]>([]);
 
@@ -549,6 +550,13 @@ function MeowApp() {
     });
     return () => cleanup?.();
   }, [isMcqAssistantActive, isMultiCaptureActive, mcqAssistantConfig]);
+
+  useEffect(() => {
+    const cleanup = window.meow?.onStartMcqMultiCaptureShortcut?.(() => {
+      if (isMcqAssistantActive) startMcqMultiCapture();
+    });
+    return () => cleanup?.();
+  }, [isMcqAssistantActive, isMultiCaptureActive]);
 
   // ── Get mic stream (with preferred device support) ──
   const getMicStream = async (preferredDeviceId?: string): Promise<MediaStream | null> => {
@@ -1002,6 +1010,7 @@ function MeowApp() {
     mcqCapturesRef.current.forEach(capture => URL.revokeObjectURL(capture.url));
     mcqCapturesRef.current = [];
     setMcqCaptures([]);
+    setMcqIncompleteNotification('');
     mcqCollectionVersionRef.current += 1;
   };
 
@@ -1030,7 +1039,6 @@ function MeowApp() {
       mcqCapturesRef.current = next;
       setMcqCaptures(next);
       setMcqAssistantStatus('ready');
-      setMcqAssistantAnswer('');
       toast.success(`Capture ${next.length} added`);
     } catch (err: any) {
       toast.error(err?.message || 'Capture failed. Check screen permission and try again.');
@@ -1042,11 +1050,16 @@ function MeowApp() {
 
   const startMcqMultiCapture = () => {
     if (mcqAssistantStatus === 'processing') return;
+    if (isMultiCaptureActive) {
+      toast.info(`Multi-Capture is already active (${mcqCapturesRef.current.length} captures collected). Use Ctrl + Shift + A to add more.`);
+      return;
+    }
     clearMcqCaptureCollection();
     setMcqAssistantAnswer('');
+    setMcqIncompleteNotification('');
     setMcqAssistantStatus('ready');
     setIsMultiCaptureActive(true);
-    toast.info('Multi-Capture started. Use Ctrl + Shift + A for each part.');
+    toast.info('Multi-Capture started (Ctrl + Shift + M). Use Ctrl + Shift + A for each part.');
   };
 
   const removeLastMcqCapture = () => {
@@ -1065,6 +1078,7 @@ function MeowApp() {
     setIsMultiCaptureActive(false);
     setMcqAssistantStatus('ready');
     setMcqAssistantAnswer('');
+    setMcqIncompleteNotification('');
     toast.info('Capture collection cancelled');
   };
 
@@ -1074,6 +1088,7 @@ function MeowApp() {
     if (!captures.length) {
       toast.warning('Question incomplete - add another capture');
       setMcqAssistantAnswer('Question incomplete - add another capture');
+      setMcqIncompleteNotification('');
       setMcqAssistantStatus('error');
       return;
     }
@@ -1081,6 +1096,7 @@ function MeowApp() {
     if (totalBytes > 13_500_000) {
       const message = 'Capture collection is too large. Remove unnecessary captures or retake narrower screenshots.';
       setMcqAssistantAnswer(message);
+      setMcqIncompleteNotification('');
       setMcqAssistantStatus('error');
       toast.error(message);
       return;
@@ -1090,24 +1106,31 @@ function MeowApp() {
     setIsAnalyzing(true);
     setMcqAssistantStatus('processing');
     setMcqAssistantAnswer('');
+    setMcqIncompleteNotification('');
     const controller = new AbortController();
     mcqAnalysisControllerRef.current = controller;
     const version = mcqCollectionVersionRef.current;
     try {
-      const answer = await requestMcqAnalysis(captures.map(capture => capture.blob), mcqAssistantConfig, controller.signal);
+      const result = await requestMcqAnalysis(captures.map(capture => capture.blob), mcqAssistantConfig, controller.signal);
       if (version !== mcqCollectionVersionRef.current || controller.signal.aborted) return;
-      setMcqAssistantAnswer(answer);
-      const recoverable = answer.startsWith('Question incomplete') || answer.startsWith('Question ambiguous') || answer.startsWith('Image unreadable');
+      setMcqAssistantAnswer(result.answer);
+      setMcqIncompleteNotification(result.incompleteNotification || '');
+      const recoverable = result.answer.startsWith('Question incomplete') || result.answer.startsWith('Question ambiguous') || result.answer.startsWith('Image unreadable') || result.answer.startsWith('No recognizable MCQ');
       setMcqAssistantStatus(recoverable ? 'error' : 'answer-ready');
       if (!recoverable) {
-        clearMcqCaptureCollection();
-        setIsMultiCaptureActive(false);
-        toast.success('Answer Ready');
+        if (!result.incompleteNotification) {
+          clearMcqCaptureCollection();
+          setIsMultiCaptureActive(false);
+          toast.success('Answer Ready');
+        } else {
+          toast.info('Answer Ready for complete questions. You can add more captures for incomplete questions.');
+        }
       }
     } catch (err: any) {
       if (err?.name !== 'AbortError' && version === mcqCollectionVersionRef.current) {
         const message = err?.message || 'MCQ analysis failed. Your captures were kept for retry.';
         setMcqAssistantAnswer(message);
+        setMcqIncompleteNotification('');
         setMcqAssistantStatus('error');
         toast.error(message);
       }
@@ -1128,6 +1151,7 @@ function MeowApp() {
     setIsAnalyzing(true);
     setMcqAssistantStatus('processing');
     setMcqAssistantAnswer('');
+    setMcqIncompleteNotification('');
     toast.info('Processing MCQ screenshot…');
 
     const controller = new AbortController();
@@ -1135,14 +1159,17 @@ function MeowApp() {
     try {
       const blob = await capturePrimaryScreen(1600, 900, 0.72);
       if (blob.size > 1_350_000) throw new Error('Screenshot is too large. Please try again.');
-      const answer = await requestMcqAnalysis([blob], mcqAssistantConfig, controller.signal);
-      setMcqAssistantAnswer(answer);
-      setMcqAssistantStatus(answer === 'No recognizable MCQ found.' ? 'error' : 'answer-ready');
-      if (answer !== 'No recognizable MCQ found.') toast.success('Answer Ready');
+      const result = await requestMcqAnalysis([blob], mcqAssistantConfig, controller.signal);
+      setMcqAssistantAnswer(result.answer);
+      setMcqIncompleteNotification(result.incompleteNotification || '');
+      const recoverable = result.answer.startsWith('Question incomplete') || result.answer.startsWith('Question ambiguous') || result.answer.startsWith('Image unreadable') || result.answer.startsWith('No recognizable MCQ');
+      setMcqAssistantStatus(recoverable ? 'error' : 'answer-ready');
+      if (!recoverable) toast.success('Answer Ready');
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         const message = err?.message || 'MCQ analysis failed. Please try again.';
         setMcqAssistantAnswer(message);
+        setMcqIncompleteNotification('');
         setMcqAssistantStatus('error');
         toast.error(message);
       }
@@ -1472,6 +1499,7 @@ function MeowApp() {
           config={mcqAssistantConfig}
           status={mcqAssistantStatus}
           answer={mcqAssistantAnswer}
+          incompleteNotification={mcqIncompleteNotification}
           multiCaptureActive={isMultiCaptureActive}
           captures={mcqCaptures}
           onStartMultiCapture={startMcqMultiCapture}

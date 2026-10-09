@@ -13,6 +13,7 @@ interface Props {
   config: McqAssistantConfig;
   status: 'ready' | 'processing' | 'answer-ready' | 'error';
   answer: string;
+  incompleteNotification?: string;
   multiCaptureActive: boolean;
   captures: McqCapture[];
   onStartMultiCapture: () => void;
@@ -23,7 +24,7 @@ interface Props {
 }
 
 export function McqAssistantPanel({
-  config, status, answer, multiCaptureActive, captures,
+  config, status, answer, incompleteNotification, multiCaptureActive, captures,
   onStartMultiCapture, onAddCapture, onFinish, onRemoveLast, onCancelCapture,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -37,8 +38,8 @@ export function McqAssistantPanel({
   const label = status === 'processing' ? 'Processing...'
     : status === 'answer-ready' ? 'Answer Ready'
       : status === 'error' ? 'Needs attention'
-        : multiCaptureActive ? `Collecting current question - ${captures.length} captures`
-          : 'Ready - press Ctrl + Shift + A';
+        : multiCaptureActive ? `Collecting question - ${captures.length} capture${captures.length === 1 ? '' : 's'}`
+          : 'Ready - Ctrl + Shift + A (single) / Ctrl + Shift + M (multi)';
 
   return (
     <section className="mcq-assistant-panel" data-window-interactive="true">
@@ -52,13 +53,28 @@ export function McqAssistantPanel({
 
       <div className="mcq-capture-actions">
         {!multiCaptureActive ? (
-          <button type="button" onClick={onStartMultiCapture} disabled={status === 'processing'}>Start Multi-Capture</button>
+          <button
+            type="button"
+            onClick={onStartMultiCapture}
+            disabled={status === 'processing'}
+            title="Start multi-capture collection (Ctrl + Shift + M)"
+          >
+            Start Multi-Capture (Ctrl+Shift+M)
+          </button>
         ) : (
           <>
-            <button type="button" onClick={onAddCapture} disabled={status === 'processing'}>Add Capture</button>
-            <button type="button" className="primary" onClick={onFinish} disabled={status === 'processing' || captures.length === 0}>Finish &amp; Analyze</button>
-            <button type="button" onClick={onRemoveLast} disabled={status === 'processing' || captures.length === 0}>Remove Last Capture</button>
-            <button type="button" onClick={onCancelCapture} disabled={status === 'processing'}>Cancel Capture</button>
+            <button type="button" onClick={onAddCapture} disabled={status === 'processing'} title="Add capture (Ctrl + Shift + A)">
+              Add Capture
+            </button>
+            <button type="button" className="primary" onClick={onFinish} disabled={status === 'processing' || captures.length === 0} title="Finish and analyze collection (Ctrl + Shift + Enter)">
+              Finish &amp; Analyze
+            </button>
+            <button type="button" onClick={onRemoveLast} disabled={status === 'processing' || captures.length === 0}>
+              Remove Last Capture
+            </button>
+            <button type="button" onClick={onCancelCapture} disabled={status === 'processing'}>
+              Cancel Capture
+            </button>
           </>
         )}
       </div>
@@ -71,7 +87,14 @@ export function McqAssistantPanel({
               <span>Capture {captures.length - displayIndex}</span>
             </div>
           ))}
-          {captures.length === 0 && <span className="mcq-capture-empty">Use Ctrl + Shift + A to add the first capture.</span>}
+          {captures.length === 0 && <span className="mcq-capture-empty">Use Ctrl + Shift + A to add captures.</span>}
+        </div>
+      )}
+
+      {incompleteNotification && (
+        <div className="mcq-incomplete-notification" role="status">
+          <span className="mcq-incomplete-badge">NOTICE</span>
+          <span>{incompleteNotification}</span>
         </div>
       )}
 

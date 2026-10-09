@@ -20,7 +20,19 @@ export interface McqImageInput {
   mimeType: "image/jpeg" | "image/png";
 }
 
-export interface McqAnalysisResult { answer: string; model: string; }
+export interface McqQuestionDetail {
+  number?: number | string;
+  status: "COMPLETE" | "INCOMPLETE" | "UNREADABLE";
+  answer?: string;
+  incompleteReason?: string;
+}
+
+export interface McqAnalysisResult {
+  answer: string;
+  model: string;
+  incompleteNotification?: string;
+  questions?: McqQuestionDetail[];
+}
 
 export type McqCompletionRunner = (args: {
   apiKey: string;
@@ -33,31 +45,253 @@ export type McqCompletionRunner = (args: {
   maxTokens?: number;
 }) => Promise<string>;
 
-export function validateMcqAnswer(raw: string): string | null {
+export interface ParsedMcqQuestion {
+  number?: number | string;
+  isComplete: boolean;
+  validatedAnswer?: string;
+  incompleteReason?: string;
+  failedValidation?: boolean;
+}
+
+export interface ProcessedMcqResult {
+  answer: string | null;
+  incompleteNotification?: string;
+  questions: ParsedMcqQuestion[];
+  specialStatus?: "NO_MCQ" | "UNREADABLE" | "INCOMPLETE" | "AMBIGUOUS";
+}
+
+function validateSingleOptionString(part: string): string | null {
+  const match = part.trim().match(/^([A-Z])\s*[).:\-]\s*(.+)$/);
+  if (!match) return null;
+  const optionLetter = match[1];
+  const optionText = match[2].trim();
+  if (!optionText || /^(the correct answer|answer|explanation|reasoning|because)\b/i.test(optionText)) return null;
+  return `${optionLetter}) ${optionText}`;
+}
+
+export function validateSingleAnswer(raw: string): string | null {
   const value = raw.trim();
   if (["NO_MCQ", "UNREADABLE", "INCOMPLETE", "AMBIGUOUS"].includes(value)) return value;
-  if (value.includes("\n") || value.length > 600) return null;
   const parts = value.split(/\s*;\s*/).filter(Boolean);
   if (!parts.length) return null;
   const normalized: string[] = [];
   for (const part of parts) {
-    const match = part.match(/^([A-Z])\s*[).:\-]\s*(.+)$/);
-    if (!match) return null;
-    const optionText = match[2].trim();
-    if (!optionText || /^(the correct answer|answer|explanation|reasoning)\b/i.test(optionText)) return null;
-    normalized.push(`${match[1]}) ${optionText}`);
+    const validated = validateSingleOptionString(part);
+    if (!validated) return null;
+    normalized.push(validated);
   }
   return normalized.join("; ");
 }
 
+export function parseAndValidateMcq(raw: string): ProcessedMcqResult {
+  const text = raw.trim();
+  if (["NO_MCQ", "UNREADABLE", "INCOMPLETE", "AMBIGUOUS"].includes(text)) {
+    return { answer: null, specialStatus: text as any, questions: [] };
+  }
+
+  // Check JSON format first
+  let jsonQuestions: any[] | null = null;
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, text];
+  const candidateJson = (jsonMatch[1] || text).trim();
+  if (candidateJson.startsWith("{") || candidateJson.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(candidateJson);
+      if (Array.isArray(parsed)) {
+        jsonQuestions = parsed;
+      } else if (parsed && Array.isArray(parsed.questions)) {
+        jsonQuestions = parsed.questions;
+      }
+    } catch {}
+  }
+
+  const questions: ParsedQuestionInternal[] = [];
+
+  interface ParsedQuestionInternal {
+    number?: number | string;
+    isComplete: boolean;
+    validatedAnswer?: string;
+    incompleteReason?: string;
+    failedValidation?: boolean;
+  }
+
+  if (jsonQuestions) {
+    for (let i = 0; i < jsonQuestions.length; i++) {
+      const item = jsonQuestions[i];
+      const qNum = item.number !== undefined ? String(item.number) : String(i + 1);
+      const status = String(item.status || (item.isComplete === false ? "INCOMPLETE" : "COMPLETE")).toUpperCase();
+      if (status === "INCOMPLETE" || item.isComplete === false) {
+        questions.push({
+          number: qNum,
+          isComplete: false,
+          incompleteReason: item.reason || item.incompleteReason || "Question incomplete",
+        });
+      } else {
+        const rawAns = String(item.answer || item.selectedOption || "").trim();
+        const validated = validateSingleAnswer(rawAns);
+        if (validated) {
+          questions.push({
+            number: qNum,
+            isComplete: true,
+            validatedAnswer: validated,
+          });
+        } else {
+          questions.push({
+            number: qNum,
+            isComplete: false,
+            failedValidation: true,
+          });
+        }
+      }
+    }
+  } else {
+    // Line-based parsing
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    // Reject reasoning/explanation when single unnumbered answer has trailing text
+    const firstLineMatch = lines[0]?.match(/^(?:question|q)?\s*(\d+)[\s.:)\-]+\s*(.+)$/i);
+    if (!firstLineMatch && lines.length > 1) {
+      const hasNumbered = lines.some(l => /^(?:question|q)?\s*\d+[\s.:)\-]/i.test(l));
+      if (!hasNumbered) {
+        return { answer: null, questions: [{ isComplete: false, failedValidation: true }] };
+      }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const numMatch = line.match(/^(?:question|q)?\s*(\d+)[\s.:)\-]+\s*(.+)$/i);
+      if (numMatch) {
+        const qNum = numMatch[1];
+        const content = numMatch[2].trim();
+        if (/^(INCOMPLETE|PARTIAL|TRUNCATED|CUT\s*OFF|MISSING)/i.test(content)) {
+          questions.push({
+            number: qNum,
+            isComplete: false,
+            incompleteReason: content,
+          });
+        } else {
+          const validated = validateSingleAnswer(content);
+          if (validated) {
+            questions.push({
+              number: qNum,
+              isComplete: true,
+              validatedAnswer: validated,
+            });
+          } else {
+            questions.push({
+              number: qNum,
+              isComplete: false,
+              failedValidation: true,
+            });
+          }
+        }
+      } else {
+        if (/^(INCOMPLETE|PARTIAL|TRUNCATED|CUT\s*OFF|MISSING)/i.test(line)) {
+          questions.push({
+            number: questions.length + 1,
+            isComplete: false,
+            incompleteReason: line,
+          });
+        } else {
+          const validated = validateSingleAnswer(line);
+          if (validated) {
+            questions.push({
+              number: lines.length === 1 ? undefined : questions.length + 1,
+              isComplete: true,
+              validatedAnswer: validated,
+            });
+          } else if (lines.length === 1) {
+            questions.push({
+              isComplete: false,
+              failedValidation: true,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Deduplicate by question number, updating incomplete questions with complete ones if available
+  const seenNumbers = new Set<string>();
+  const deduplicated: ParsedQuestionInternal[] = [];
+  for (const q of questions) {
+    const key = q.number !== undefined ? String(q.number).trim() : "";
+    if (key && seenNumbers.has(key)) {
+      const existing = deduplicated.find(x => String(x.number).trim() === key);
+      if (existing && !existing.isComplete && q.isComplete) {
+        existing.isComplete = true;
+        existing.validatedAnswer = q.validatedAnswer;
+        delete existing.incompleteReason;
+      }
+      continue;
+    }
+    if (key) seenNumbers.add(key);
+    deduplicated.push(q);
+  }
+
+  const complete = deduplicated.filter(q => q.isComplete && q.validatedAnswer);
+  const incomplete = deduplicated.filter(q => !q.isComplete && !q.failedValidation);
+
+  let formattedAnswer: string | null = null;
+  if (complete.length === 1 && complete[0].number === undefined) {
+    formattedAnswer = complete[0].validatedAnswer!;
+  } else if (complete.length === 1 && deduplicated.length === 1) {
+    formattedAnswer = complete[0].number !== undefined ? `${complete[0].number}. ${complete[0].validatedAnswer}` : complete[0].validatedAnswer!;
+  } else if (complete.length > 0) {
+    formattedAnswer = complete.map((q, idx) => {
+      const num = q.number !== undefined ? q.number : idx + 1;
+      return `${num}. ${q.validatedAnswer}`;
+    }).join("\n");
+  }
+
+  let incompleteNotification: string | undefined;
+  if (incomplete.length > 0) {
+    const nums = incomplete.map(q => q.number).filter(Boolean);
+    if (nums.length === 1) {
+      incompleteNotification = `Question ${nums[0]} incomplete — add another capture`;
+    } else if (nums.length > 1) {
+      incompleteNotification = `Questions ${nums.join(", ")} incomplete — add another capture`;
+    } else {
+      incompleteNotification = "Question incomplete — add another capture";
+    }
+  }
+
+  return {
+    answer: formattedAnswer,
+    incompleteNotification,
+    questions: deduplicated,
+  };
+}
+
+export function validateMcqAnswer(raw: string): string | null {
+  const value = raw.trim();
+  if (["NO_MCQ", "UNREADABLE", "INCOMPLETE", "AMBIGUOUS"].includes(value)) return value;
+  const result = parseAndValidateMcq(raw);
+  return result.answer;
+}
+
 export function buildMcqPrompt(config: McqAssistantConfig, imageCount = 1): string {
   return [
-    `The ${imageCount} image(s) are chronological captures of one current MCQ. Consecutive images may overlap; treat overlap as repeated context, not separate questions.`,
-    "Identify the complete stem, relevant passage, table, chart, diagram, formulas or code, and all visible options before solving.",
-    "Read NOT, EXCEPT, LEAST, assertion-reason, all/none-of-the-above, and multiple-answer instructions exactly.",
-    "For one answer return exactly: C) exact visible option text. For multiple answers return: A) exact text; C) exact text.",
-    "Selected letters must exist in the visible options and their text must match. Do not explain, use markdown, invent options, or alter letters.",
-    "Return exactly INCOMPLETE if the stem/options continue beyond the captures; UNREADABLE if essential detail cannot be read; AMBIGUOUS if multiple questions are equally prominent; NO_MCQ if no MCQ exists.",
+    `The ${imageCount} chronological image(s) capture one or more multiple-choice questions (MCQs). Overlapping images represent continued context.`,
+    "INSTRUCTIONS:",
+    "1. Scan top-to-bottom. Identify every distinct MCQ and its question number (e.g., 1, 2, 3...) or sequential order if unnumbered.",
+    "2. For each question, extract its stem, relevant passage/table/code/formula/diagram context, and all visible options (e.g. A, B, C, D, E).",
+    "3. Determine completeness for each question independently:",
+    "   - COMPLETE: The question stem and its answer choices are sufficiently visible to solve definitively.",
+    "   - INCOMPLETE: The question stem or options are clipped, truncated, cut off (e.g. at the bottom of the screenshot), or missing required choices.",
+    "4. For every COMPLETE question, solve it independently. Output the chosen option letter and EXACT visible option text.",
+    "   - Respect NOT, EXCEPT, LEAST, assertion-reason, all/none-of-the-above, and multiple-answer instructions.",
+    "   - Single answer format: C) exact visible option text",
+    "   - Multiple answers format: A) exact text; C) exact text",
+    "   - Never invent options, alter option letters, or add explanations or reasoning.",
+    "5. For any INCOMPLETE question, mark it INCOMPLETE (e.g. 3. INCOMPLETE). Never let an incomplete question prevent answering other complete questions.",
+    "6. FORMAT YOUR RESPONSE:",
+    "   Provide each question on its own line in order, like this:",
+    "   1. A) 9944",
+    "   2. C) 5",
+    "   3. INCOMPLETE",
+    "   If only a single unnumbered question is present on the screen:",
+    "   C) exact option text",
+    "   (If no questions exist at all, return NO_MCQ. If completely unreadable, return UNREADABLE).",
     `Test category: ${config.category}`,
     `Subject/domain: ${config.subject || "Not specified"}`,
     `Difficulty: ${config.difficulty}`,
@@ -66,7 +300,7 @@ export function buildMcqPrompt(config: McqAssistantConfig, imageCount = 1): stri
   ].filter(Boolean).join("\n");
 }
 
-const defaultCompletionRunner: McqCompletionRunner = async ({ apiKey, model, images, prompt, signal, maxTokens = 160 }) => {
+const defaultCompletionRunner: McqCompletionRunner = async ({ apiKey, model, images, prompt, signal, maxTokens = 1024 }) => {
   const client = new Groq({ apiKey });
   const content: any[] = [{ type: "text", text: prompt }];
   for (const image of images) {
@@ -101,7 +335,7 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
   if (images.length <= MAX_IMAGES_PER_MODEL_REQUEST) {
     return runWithTimeout(runner, {
       apiKey, model, images, imageBase64: images[0]?.imageBase64, mimeType: images[0]?.mimeType,
-      prompt: buildMcqPrompt(config, images.length), maxTokens: 160,
+      prompt: buildMcqPrompt(config, images.length), maxTokens: 1024,
     });
   }
 
@@ -112,11 +346,11 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
     const observation = await runWithTimeout(runner, {
       apiKey, model, images: batch, imageBase64: batch[0]?.imageBase64, mimeType: batch[0]?.mimeType,
       prompt: [
-        `These are chronological images ${offset + 1}-${offset + batch.length} from one long MCQ.`,
-        "Transcribe only visible question/passage text, option letters and exact option text, formulas, code indentation, and objective chart/diagram/table labels.",
+        `These are chronological images ${offset + 1}-${offset + batch.length} of an assessment page containing one or more MCQs.`,
+        "Transcribe only visible question stems with question numbers, passage text, option letters and exact option text, formulas, code indentation, and objective chart/diagram/table labels.",
         "Note continuation and overlap with adjacent captures. Do not solve and do not infer missing content.",
       ].join("\n"),
-      maxTokens: 900,
+      maxTokens: 1024,
     });
     if (!observation.trim()) throw new Error(`Empty observation for image batch ${batchNumber}`);
     observations.push(`[ORDERED BATCH ${batchNumber}]\n${observation.trim()}`);
@@ -124,7 +358,7 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
   return runWithTimeout(runner, {
     apiKey, model, images: [],
     prompt: `${buildMcqPrompt(config, images.length)}\n\nOrdered visual observations:\n${observations.join("\n\n")}`,
-    maxTokens: 180,
+    maxTokens: 1024,
   });
 }
 
@@ -153,17 +387,51 @@ export async function analyzeMcqScreenshot(
       for (const model of MODEL_SEQUENCE) {
         try {
           const raw = await analyzeWithModel(lease.apiKey, model, images, input.config, runner);
-          const answer = validateMcqAnswer(raw);
-          if (answer === "NO_MCQ" || answer === "INCOMPLETE") {
+          const parsed = parseAndValidateMcq(raw);
+
+          if (parsed.specialStatus === "NO_MCQ") {
             providerKeyPool.recordSuccess(lease.credentialId, model);
             return { answer: "Question incomplete - add another capture", model };
           }
-          if (answer === "AMBIGUOUS") {
+          if (parsed.specialStatus === "AMBIGUOUS") {
             providerKeyPool.recordSuccess(lease.credentialId, model);
             return { answer: "Question ambiguous - capture the intended question more clearly", model };
           }
-          if (answer === "UNREADABLE") { sawUnreadable = true; lastKeyError = new Error("unreadable"); continue; }
-          if (answer) { providerKeyPool.recordSuccess(lease.credentialId, model); return { answer, model }; }
+          if (parsed.specialStatus === "UNREADABLE") {
+            sawUnreadable = true;
+            lastKeyError = new Error("unreadable");
+            continue;
+          }
+
+          if (parsed.answer) {
+            providerKeyPool.recordSuccess(lease.credentialId, model);
+            return {
+              answer: parsed.answer,
+              model,
+              incompleteNotification: parsed.incompleteNotification,
+              questions: parsed.questions.map(q => ({
+                number: q.number,
+                status: q.isComplete ? "COMPLETE" : "INCOMPLETE",
+                answer: q.validatedAnswer,
+                incompleteReason: q.incompleteReason,
+              })),
+            };
+          }
+
+          if (parsed.specialStatus === "INCOMPLETE" || parsed.incompleteNotification || parsed.questions.some(q => !q.isComplete)) {
+            providerKeyPool.recordSuccess(lease.credentialId, model);
+            return {
+              answer: "Question incomplete - add another capture",
+              model,
+              incompleteNotification: parsed.incompleteNotification,
+              questions: parsed.questions.map(q => ({
+                number: q.number,
+                status: "INCOMPLETE",
+                incompleteReason: q.incompleteReason,
+              })),
+            };
+          }
+
           lastKeyError = new Error("Invalid MCQ answer format");
         } catch (err: any) {
           lastKeyError = err;

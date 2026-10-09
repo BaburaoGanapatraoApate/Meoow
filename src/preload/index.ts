@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('meow', {
   clearAuthToken: () => ipcRenderer.invoke('auth:clear-token'),
   getDeviceIdentity: () => ipcRenderer.invoke('device:get-identity'),
   openRazorpayCheckout: (options: any) => ipcRenderer.invoke('payment:open-checkout', options),
+  getMcqShortcuts: () => ipcRenderer.invoke('app:get-mcq-shortcuts'),
 
   // Send (one-way) APIs
   quitApp: () => ipcRenderer.send('app:end'),
@@ -50,6 +51,11 @@ contextBridge.exposeInMainWorld('meow', {
     const listener = () => cb();
     ipcRenderer.on('shortcut:analyze-screen', listener);
     return () => ipcRenderer.off('shortcut:analyze-screen', listener);
+  },
+  onStartMcqMultiCaptureShortcut: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on('shortcut:start-mcq-multi-capture', listener);
+    return () => ipcRenderer.off('shortcut:start-mcq-multi-capture', listener);
   },
   onFinishMcqCaptureShortcut: (cb: () => void) => {
     const listener = () => cb();

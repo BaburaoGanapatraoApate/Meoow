@@ -109,7 +109,12 @@ router.post(
     activeMcqAssistantUsers.add(userId);
     try {
       const result = await analyzeMcqScreenshot({ images, config: parsed.data.config });
-      res.status(200).json({ answer: result.answer, model: result.model });
+      res.status(200).json({
+        answer: result.answer,
+        model: result.model,
+        incompleteNotification: result.incompleteNotification,
+        questions: result.questions,
+      });
     } catch (err: any) {
       const status = [400, 413, 422, 503].includes(err?.status) ? err.status : 502;
       res.status(status).json({

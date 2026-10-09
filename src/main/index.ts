@@ -65,6 +65,7 @@ const EVENTS = {
   SESSION_START: "session:start",
   SCREEN_PERMISSION_STATUS: "screen:permission:status",
   ANALYZE_SCREEN_SHORTCUT: "shortcut:analyze-screen",
+  START_MCQ_MULTI_CAPTURE_SHORTCUT: "shortcut:start-mcq-multi-capture",
   FINISH_MCQ_CAPTURE_SHORTCUT: "shortcut:finish-mcq-capture",
   PROTECTION_SUPPORTED: "privacy:protection-supported",
 };
@@ -501,6 +502,22 @@ function registerShortcuts() {
     if (!win.isVisible() && !isMcqMultiCaptureMode) showInactiveWindow();
     win.webContents.send(EVENTS.ANALYZE_SCREEN_SHORTCUT);
   });
+  let multiCaptureRegisteredKey = "CommandOrControl+Shift+M";
+  let startMultiMcqRegistered = globalShortcut.register(multiCaptureRegisteredKey, () => {
+    win?.webContents.send(EVENTS.START_MCQ_MULTI_CAPTURE_SHORTCUT);
+  });
+  if (!startMultiMcqRegistered) {
+    console.warn("[Meoow] Ctrl+Shift+M registration failed; trying Ctrl+Alt+Shift+M.");
+    multiCaptureRegisteredKey = "CommandOrControl+Alt+Shift+M";
+    startMultiMcqRegistered = globalShortcut.register(multiCaptureRegisteredKey, () => {
+      win?.webContents.send(EVENTS.START_MCQ_MULTI_CAPTURE_SHORTCUT);
+    });
+  }
+  if (!startMultiMcqRegistered) {
+    console.warn("[Meoow] Multi-Capture shortcut registration failed; use UI button.");
+    multiCaptureRegisteredKey = "";
+  }
+
   const finishMcqRegistered = globalShortcut.register("CommandOrControl+Shift+Enter", () => {
     win?.webContents.send(EVENTS.FINISH_MCQ_CAPTURE_SHORTCUT);
   });
@@ -515,6 +532,16 @@ function registerShortcuts() {
     win?.webContents.toggleDevTools();
   });
 }
+
+ipcMain.handle("app:get-mcq-shortcuts", () => ({
+  multiCapture: globalShortcut.isRegistered("CommandOrControl+Shift+M")
+    ? "Ctrl + Shift + M"
+    : globalShortcut.isRegistered("CommandOrControl+Alt+Shift+M")
+      ? "Ctrl + Alt + Shift + M"
+      : null,
+  addCapture: "Ctrl + Shift + A",
+  finishCapture: globalShortcut.isRegistered("CommandOrControl+Shift+Enter") ? "Ctrl + Shift + Enter" : null,
+}));
 
 ipcMain.on("shortcut:set-mcq-capture-mode", (_event, enabled: boolean) => {
   isMcqMultiCaptureMode = Boolean(enabled);

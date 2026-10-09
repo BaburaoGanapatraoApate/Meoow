@@ -2,11 +2,25 @@ import type { McqAssistantConfig } from '../components/McqAssistantSetup';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://api.meooow.tech').replace(/\/+$/, '');
 
+export interface McqQuestionItem {
+  number?: number | string;
+  status: 'COMPLETE' | 'INCOMPLETE' | 'UNREADABLE';
+  answer?: string;
+  incompleteReason?: string;
+}
+
+export interface McqAssistantResponse {
+  answer: string;
+  model?: string;
+  incompleteNotification?: string;
+  questions?: McqQuestionItem[];
+}
+
 export async function analyzeMcqScreenshot(
   blobs: Blob[],
   config: McqAssistantConfig,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<McqAssistantResponse> {
   const token = await window.meow?.getAuthToken?.();
   if (!token) throw new Error('Authentication required.');
 
@@ -47,5 +61,12 @@ export async function analyzeMcqScreenshot(
   if (typeof data.answer !== 'string' || !data.answer.trim()) {
     throw new Error('The model returned no valid MCQ answer.');
   }
-  return data.answer.trim();
+  return {
+    answer: data.answer.trim(),
+    model: data.model,
+    incompleteNotification: typeof data.incompleteNotification === 'string' && data.incompleteNotification.trim()
+      ? data.incompleteNotification.trim()
+      : undefined,
+    questions: Array.isArray(data.questions) ? data.questions : undefined,
+  };
 }
