@@ -10,6 +10,7 @@ import {
   setUserUsageMode,
   ProviderCredentialError,
 } from "../services/providerCredentialService";
+import { providerKeyPool } from "../services/providerKeyPool";
 
 const router = Router();
 
@@ -407,6 +408,22 @@ router.get("/audit-logs", async (req: AdminRequest, res: Response) => {
     res.status(500).json({
       error: "FETCH_AUDIT_LOGS_FAILED",
       message: "Failed to retrieve admin audit logs.",
+    });
+  }
+});
+
+/**
+ * 10. GET /api/admin/provider-pools
+ * View safe provider pool diagnostics (zero secrets).
+ */
+router.get("/provider-pools", async (_req: AdminRequest, res: Response) => {
+  try {
+    const diagnostics = providerKeyPool.getDiagnostics();
+    res.status(200).json(diagnostics);
+  } catch (err: any) {
+    res.status(500).json({
+      error: "FETCH_PROVIDER_POOLS_FAILED",
+      message: "Failed to retrieve provider pool diagnostics.",
     });
   }
 });

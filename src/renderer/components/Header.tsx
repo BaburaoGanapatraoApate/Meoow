@@ -41,6 +41,11 @@ interface HeaderProps {
   onOpenPurchaseModal?: () => void;
   onClosePurchaseModal?: () => void;
   zeroCreditCountdown?: number | null;
+  isMcqAssistantActive?: boolean;
+  isShowingMcqAssistantSetup?: boolean;
+  onStartMcqAssistant?: () => void;
+  onEndMcqAssistant?: () => void;
+  isMcqMultiCaptureActive?: boolean;
 }
 
 export default function Header({
@@ -69,6 +74,11 @@ export default function Header({
   onOpenPurchaseModal,
   onClosePurchaseModal,
   zeroCreditCountdown,
+  isMcqAssistantActive = false,
+  isShowingMcqAssistantSetup = false,
+  onStartMcqAssistant,
+  onEndMcqAssistant,
+  isMcqMultiCaptureActive = false,
 }: HeaderProps) {
   const { user, logout } = useAuth();
   const toast = useToast();
@@ -157,7 +167,7 @@ export default function Header({
 
   // Session duration timer
   useEffect(() => {
-    if (isSessionStarted) {
+    if (isSessionStarted || isMcqAssistantActive) {
       if (!sessionStartTime.current) sessionStartTime.current = Date.now();
       const timer = setInterval(() => {
         setSessionDuration(Math.floor((Date.now() - (sessionStartTime.current || Date.now())) / 1000));
@@ -167,7 +177,7 @@ export default function Header({
       sessionStartTime.current = null;
       setSessionDuration(0);
     }
-  }, [isSessionStarted]);
+  }, [isSessionStarted, isMcqAssistantActive]);
 
   const requestScreenPermission = async () => {
     setRequestingPermission(true);
@@ -187,7 +197,7 @@ export default function Header({
 
   // Connection status indicator
   const renderConnectionStatus = () => {
-    if (!isSessionStarted) return null;
+    if (!isSessionStarted || isMcqAssistantActive) return null;
 
     const stateMap: Record<string, { label: string; className: string }> = {
       connected: { label: '● Connected', className: 'connected' },
@@ -211,7 +221,7 @@ export default function Header({
 
   // Queue indicator
   const renderQueueIndicator = () => {
-    if (!isSessionStarted || pendingCopilotWork <= 0) return null;
+    if (!isSessionStarted || isMcqAssistantActive || pendingCopilotWork <= 0) return null;
     return (
       <div className="copilot-queue-indicator">
         <span className="copilot-queue-spinner" />
@@ -222,7 +232,7 @@ export default function Header({
 
   // Duration indicator
   const renderDurationIndicator = () => {
-    if (!isSessionStarted) return null;
+    if (!isSessionStarted && !isMcqAssistantActive) return null;
     return (
       <div className="session-duration-indicator">
         {formatDuration(sessionDuration)}
@@ -389,7 +399,11 @@ export default function Header({
           {renderDurationIndicator()}
           {renderQueueIndicator()}
 
-          {isSessionStarted && (
+          {isMcqAssistantActive && (
+            <span className="mcq-header-mode-badge">MCQ Assistant</span>
+          )}
+
+          {isSessionStarted && !isMcqAssistantActive && (
             <>
               <label className="auto-answer-toggle" data-window-interactive="true">
                 <input type="checkbox" checked={autoAnswer} onChange={(e) => onAutoAnswerChange?.(e.target.checked)} />
@@ -406,25 +420,27 @@ export default function Header({
 
         {/* RIGHT ACTIONS: mic, Analyze, End, menu */}
         <div className="header-right">
-          {isSessionStarted ? (
+          {isSessionStarted || isMcqAssistantActive ? (
             <div className="session-controls" data-window-interactive="true">
-              <button
-                type="button"
-                onClick={onToggleMic}
-                className={`mic-button ${isMicEnabled ? '' : 'muted'}`}
-                title={isMicEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
-                data-window-interactive="true"
-              >
-                {isMicEnabled ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 19v3" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><rect x="9" y="2" width="6" height="13" rx="3" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 19v3" /><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" /><path d="M16.95 16.95A7 7 0 0 1 5 12v-2" /><path d="M18.89 13.23A7 7 0 0 0 19 12v-2" /><path d="m2 2 20 20" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
-                  </svg>
-                )}
-              </button>
+              {!isMcqAssistantActive && (
+                <button
+                  type="button"
+                  onClick={onToggleMic}
+                  className={`mic-button ${isMicEnabled ? '' : 'muted'}`}
+                  title={isMicEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
+                  data-window-interactive="true"
+                >
+                  {isMicEnabled ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 19v3" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><rect x="9" y="2" width="6" height="13" rx="3" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 19v3" /><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" /><path d="M16.95 16.95A7 7 0 0 1 5 12v-2" /><path d="M18.89 13.23A7 7 0 0 0 19 12v-2" /><path d="m2 2 20 20" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
+                    </svg>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onAnalyzeScreen}
@@ -436,6 +452,8 @@ export default function Header({
                     ? `Rate limited. Retry in ~${formatCooldown(analyzeCooldown)}`
                     : isAnalyzing
                     ? 'Analyzing Screen...'
+                    : isMcqMultiCaptureActive
+                    ? 'Add Capture (Ctrl+Shift+A)'
                     : 'Analyze Screen (Ctrl+Shift+A)'
                 }
                 data-window-interactive="true"
@@ -444,13 +462,13 @@ export default function Header({
                   <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z" />
                   <path d="M20.054 15.987H3.946" />
                 </svg>
-                {analyzeCooldown > 0 ? `Retry (${formatCooldown(analyzeCooldown)})` : isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                {analyzeCooldown > 0 ? `Retry (${formatCooldown(analyzeCooldown)})` : isAnalyzing ? 'Capturing...' : isMcqMultiCaptureActive ? 'Add Capture' : 'Analyze'}
               </button>
               <button
                 type="button"
-                onClick={onEnd}
+                onClick={isMcqAssistantActive ? onEndMcqAssistant : onEnd}
                 className="end-button"
-                title="End Interview Session"
+                title={isMcqAssistantActive ? 'End MCQ Assistant Session' : 'End Interview Session'}
                 data-window-interactive="true"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -502,7 +520,8 @@ export default function Header({
                     Cancel
                   </button>
                 </>
-              ) : (
+              ) : isShowingMcqAssistantSetup ? null : (
+                <>
                 <button
                   type="button"
                   onClick={() => {
@@ -522,6 +541,18 @@ export default function Header({
                 >
                   Start Interview
                 </button>
+                {user?.email?.trim().toLowerCase() === 'yeolekrushnar@gmail.com' && (
+                  <button
+                    type="button"
+                    onClick={onStartMcqAssistant}
+                    className="start-button mcq-assistant-start-button"
+                    title="Configure the admin-only MCQ screenshot assistant"
+                    data-window-interactive="true"
+                  >
+                    MCQ Assistant (Admin)
+                  </button>
+                )}
+                </>
               )}
               {renderMenu()}
               <button type="button" onClick={() => window.meow?.quitApp?.()} className="close-app-button" title="Quit Application" data-window-interactive="true">
@@ -554,7 +585,7 @@ export default function Header({
         <div className="keyboard-shortcuts">
           <p>Show/Hide: <span className="key-badge">{modKey}</span> + <span className="text-badge">shift</span> + <span className="text-badge">H</span></p>
           <p>Move: <span className="key-badge">{altKey}</span> + <span className="key-badge">← ↑ → ↓</span></p>
-          {isSessionStarted && (
+          {(isSessionStarted || isMcqAssistantActive) && (
             <p>Analyze: <span className="key-badge">{modKey}</span> + <span className="text-badge">shift</span> + <span className="text-badge">A</span></p>
           )}
         </div>

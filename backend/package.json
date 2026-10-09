@@ -18,7 +18,19 @@
     "test:security": "tsx src/testSecurity.ts",
     "test:groq": "tsx src/testGroqGateway.ts",
     "test:deepgram": "tsx src/testDeepgramGateway.ts",
-    "test:auth": "tsx src/testAuth.ts"
+    "test:auth": "tsx src/testAuth.ts",
+    "test:provider-pool": "tsx src/testProviderPool.ts",
+    "test:vision": "tsx src/testVisionFallback.ts",
+    "test:admin-reset": "tsx src/testAdminResetPassword.ts",
+    "test:dedup": "tsx src/testScreenDeduplication.ts",
+    "test:context": "tsx src/testIntelligentContext.ts",
+    "test:prompt": "tsx src/testPromptCompression.ts",
+    "test:output-budget": "tsx src/testOutputBudgets.ts",
+    "test:unnecessary-call": "tsx src/testUnnecessaryCallGuard.ts",
+    "test:screen-fingerprint": "tsx src/testScreenFingerprint.ts",
+    "test:mcq-assistant": "tsx src/testMcqAssistant.ts",
+    "admin:bootstrap": "tsx src/db/bootstrapAdmin.ts",
+    "admin:reset-password": "tsx src/scripts/resetPassword.ts"
   },
   "keywords": [],
   "author": "",
@@ -32,6 +44,7 @@
     "express-rate-limit": "^8.7.0",
     "groq-sdk": "^1.6.0",
     "helmet": "^8.3.0",
+    "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "razorpay": "^2.9.8",
@@ -46,6 +59,7 @@
     "@types/node": "^26.4.1",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
+    "embedded-postgres": "^18.4.0-beta.17",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

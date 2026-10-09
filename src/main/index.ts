@@ -47,7 +47,7 @@ for (const _p of _envPaths) {
   } catch (_) {}
 }
 
-import { app, BrowserWindow, screen, desktopCapturer, systemPreferences, shell, globalShortcut, session } from "electron";
+import { app, BrowserWindow, screen, desktopCapturer, systemPreferences, shell, globalShortcut, session, ipcMain } from "electron";
 import { isContentProtectionFullySupported, applyContentProtection, removeContentProtection, applyPrivateMode as applyPrivateModeHelper } from "./windowProtection";
 import { parseSessionStartUrl } from "./deepLink";
 import { registerIpcHandlers } from "./ipcHandlers";
@@ -59,11 +59,13 @@ let isIgnoringMouseEvents = false;
 const PROTOCOL = "meow";
 let pendingSessionStart: any = null;
 let isPrivateModeEnabled = true;
+let isMcqMultiCaptureMode = false;
 
 const EVENTS = {
   SESSION_START: "session:start",
   SCREEN_PERMISSION_STATUS: "screen:permission:status",
   ANALYZE_SCREEN_SHORTCUT: "shortcut:analyze-screen",
+  FINISH_MCQ_CAPTURE_SHORTCUT: "shortcut:finish-mcq-capture",
   PROTECTION_SUPPORTED: "privacy:protection-supported",
 };
 
@@ -496,9 +498,15 @@ function registerShortcuts() {
       createWindow();
       return;
     }
-    if (!win.isVisible()) showInactiveWindow();
+    if (!win.isVisible() && !isMcqMultiCaptureMode) showInactiveWindow();
     win.webContents.send(EVENTS.ANALYZE_SCREEN_SHORTCUT);
   });
+  const finishMcqRegistered = globalShortcut.register("CommandOrControl+Shift+Enter", () => {
+    win?.webContents.send(EVENTS.FINISH_MCQ_CAPTURE_SHORTCUT);
+  });
+  if (!finishMcqRegistered) {
+    console.warn("[Meoow] Ctrl+Shift+Enter registration failed; use the MCQ Finish & Analyze button.");
+  }
   globalShortcut.register("Alt+Left", () => moveWindow(-20, 0));
   globalShortcut.register("Alt+Right", () => moveWindow(20, 0));
   globalShortcut.register("Alt+Up", () => moveWindow(0, -20));
@@ -507,6 +515,10 @@ function registerShortcuts() {
     win?.webContents.toggleDevTools();
   });
 }
+
+ipcMain.on("shortcut:set-mcq-capture-mode", (_event, enabled: boolean) => {
+  isMcqMultiCaptureMode = Boolean(enabled);
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

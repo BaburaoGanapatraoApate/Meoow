@@ -171,6 +171,7 @@ export function registerIpcHandlers(
   ipcMain.handle("get-screen-sources", async () => {
     try {
       const primaryDisplayId = String(screen.getPrimaryDisplay().id);
+      const currentDisplayId = String(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id);
       const sources = await desktopCapturer.getSources({
         types: ["screen"],
         thumbnailSize: { width: 1, height: 1 },
@@ -180,11 +181,20 @@ export function registerIpcHandlers(
         name: source.name,
         display_id: source.display_id,
         isPrimary: String(source.display_id) === primaryDisplayId,
+        isCurrent: String(source.display_id) === currentDisplayId,
       }));
     } catch (error) {
       console.error("Failed to get screen sources:", error);
       return [];
     }
+  });
+
+  ipcMain.handle("capture:set-overlay-hidden", (event, hidden: boolean) => {
+    const target = BrowserWindow.fromWebContents(event.sender);
+    if (!target || target.isDestroyed()) return false;
+    if (hidden) target.hide();
+    else target.showInactive();
+    return true;
   });
 
   // Audio capture relay

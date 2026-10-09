@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  SessionContext,
-  Answer,
-  TaskClassificationResult,
-  BoundedContextPayload,
+import {
+  DEFAULT_VISION_MODEL,
+  type SessionContext,
+  type Answer,
+  type TaskClassificationResult,
+  type BoundedContextPayload,
 } from '../types';
 import { stitchAnswerContinuation } from '../utils/continuationStitcher';
 
@@ -232,7 +233,7 @@ export class GroqClient {
       ];
 
       const continuationPrompt =
-        'Continue exactly from where the previous answer stopped. Do not repeat previous content. Complete the unfinished sentence, section, or code block. Return only the continuation.';
+        'Continue from where the previous answer stopped. Complete unfinished code or sentences without repeating previous text. Return only the continuation.';
 
       const continuationPayload = {
         ...record.payload,
@@ -465,7 +466,7 @@ export class GroqClient {
   }
 
   /** Send screen capture for analysis */
-  async sendScreenCapture(blob: Blob): Promise<string | null> {
+  async sendScreenCapture(blob: Blob, boundedContext?: BoundedContextPayload): Promise<string | null> {
     if (this.disconnected) return null;
 
     const requestId = uuidv4();
@@ -484,20 +485,13 @@ export class GroqClient {
 
     const payload = {
       imageBase64: base64,
-      question:
-        'You are an expert technical interview co-pilot assisting the candidate in real time.\n' +
-        'TASK:\n' +
-        '1. Identify the exact interview question, coding problem, multiple choice question (MCQ), or system design challenge visible on this screen.\n' +
-        '2. DIRECT ANSWER FIRST: Provide the immediate, actionable solution, correct MCQ option, or optimal code immediately.\n' +
-        'CRITICAL RULES:\n' +
-        '- DO NOT describe the screenshot, IDE layout, window borders, or UI elements.\n' +
-        '- DO NOT say "In this screenshot I see..." or "The screen displays...".\n' +
-        '- If a coding problem: give a 1-sentence approach then the optimal, complete solution code with time/space complexity.\n' +
-        '- If an MCQ: state the correct option letter/text clearly and explain why in 1-2 sentences.\n' +
-        '- If terminal or code error: state the exact fix immediately.\n' +
-        '- If a question is highlighted or asked by an interviewer, answer that question directly.',
-      model: this.sessionContext.visionModel || 'qwen/qwen3.6-27b',
-      sessionContext: this.sessionContext,
+      question: 'Analyze the visible interview challenge on this screen and provide the immediate direct solution.',
+      model: this.sessionContext.visionModel || DEFAULT_VISION_MODEL,
+      boundedContext,
+      sessionContext: {
+        ...this.sessionContext,
+        boundedContext,
+      },
     };
 
     this.requestRecords.set(requestId, {

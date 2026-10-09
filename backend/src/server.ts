@@ -110,7 +110,9 @@ app.use(
 // 4. Request Body Parsers with Controlled Limits & Raw Body Capture for Webhooks
 app.use(
   express.json({
-    limit: "2mb",
+    // MCQ multi-capture is bounded and validated to 17 MB in its authenticated route.
+    // Existing routes retain their own strict field-level schemas.
+    limit: "20mb",
     verify: (req: any, _res: Response, buf: Buffer) => {
       req.rawBody = buf;
     },

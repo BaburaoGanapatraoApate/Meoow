@@ -1,4 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
+import {
+  selectIntelligentContext,
+  evaluateThreadTransition,
+  deduceRequestType,
+  isFollowUpQuestion,
+  isResumeDrilldownQuestion,
+  extractEntitiesFromText,
+  estimateTokens as canonicalEstimateTokens,
+  type RequestType,
+} from '../../../backend/src/services/intelligentContextEngine';
 import type {
   InterviewContext,
   ContextEvent,
@@ -23,8 +33,7 @@ export type ContextChangeListener = (context: Readonly<InterviewContext>, event:
 
 /** Approximate token counting (~4 characters per token) */
 export function estimateTokens(text?: string | null): number {
-  if (!text) return 0;
-  return Math.max(1, Math.ceil(text.trim().length / 4));
+  return canonicalEstimateTokens(text);
 }
 
 /** Extract key technical skills from text deterministically */
@@ -184,6 +193,16 @@ export class InterviewContextManager {
     switch (input.type) {
       case 'TRANSCRIPT_TURN_ADDED': {
         const { speaker, text, source } = input.payload;
+        if (speaker === 'interviewer') {
+          this.current.question = text;
+          const transition = evaluateThreadTransition({
+            currentQuestion: text,
+            taskType: this.current.taskType,
+            currentThread: this.activeDiscussionThread,
+            timestamp: event.timestamp,
+          });
+          this.activeDiscussionThread = transition.thread;
+        }
         const turn: DialogueTurn = {
           turnId: `turn_${this.sequenceNumber}`,
           sequenceNumber: this.sequenceNumber,
@@ -192,15 +211,13 @@ export class InterviewContextManager {
           text,
           timestamp: event.timestamp,
           tokenCount: estimateTokens(text),
+          threadId: this.activeDiscussionThread?.threadId,
+          taskType: this.current.taskType || undefined,
         };
         this.recentTurns.push(turn);
         // Keep in-memory turns bounded to last 20
         if (this.recentTurns.length > 20) {
           this.recentTurns.shift();
-        }
-
-        if (speaker === 'interviewer') {
-          this.current.question = text;
         }
         break;
       }
@@ -215,22 +232,24 @@ export class InterviewContextManager {
           throw new Error('Raw screenshot binaries or data URLs must NOT enter InterviewContext.');
         }
 
+        if (this.current.latestScreenObservation) {
+          (this.current.latestScreenObservation as any).isSuperseded = true;
+        }
+        (obs as any).isSuperseded = false;
         this.current.latestScreenObservation = obs;
         if (obs.taskType) {
           this.current.taskType = obs.taskType;
         }
 
-        // If no active thread exists, initialize it from the screen problem
-        if (!this.activeDiscussionThread && obs.primaryQuestionOrProblem) {
-          this.activeDiscussionThread = {
-            threadId: `thread_${Date.now()}`,
-            parentTopic: obs.primaryQuestionOrProblem.slice(0, 100),
+        // If screen has a problem statement, transition/update thread
+        if (obs.primaryQuestionOrProblem) {
+          const transition = evaluateThreadTransition({
+            currentQuestion: obs.primaryQuestionOrProblem,
             taskType: obs.taskType || 'SYSTEM_DESIGN',
-            establishedDecisions: [],
-            lastQuestion: obs.primaryQuestionOrProblem,
-            startedAt: event.timestamp,
-            turnCount: 1,
-          };
+            currentThread: this.activeDiscussionThread,
+            timestamp: event.timestamp,
+          });
+          this.activeDiscussionThread = transition.thread;
         }
         break;
       }
@@ -241,6 +260,14 @@ export class InterviewContextManager {
         if (taskType) {
           this.current.taskType = taskType;
         }
+        const transition = evaluateThreadTransition({
+          currentQuestion: text,
+          taskType: taskType || this.current.taskType,
+          currentThread: this.activeDiscussionThread,
+          timestamp: event.timestamp,
+        });
+        this.activeDiscussionThread = transition.thread;
+
         const turn: DialogueTurn = {
           turnId: `turn_${this.sequenceNumber}`,
           sequenceNumber: this.sequenceNumber,
@@ -249,6 +276,8 @@ export class InterviewContextManager {
           text: text.trim(),
           timestamp: event.timestamp,
           tokenCount: estimateTokens(text),
+          threadId: this.activeDiscussionThread?.threadId,
+          taskType: taskType || this.current.taskType || undefined,
         };
         this.recentTurns.push(turn);
         if (this.recentTurns.length > 20) {
@@ -278,6 +307,8 @@ export class InterviewContextManager {
           text: conciseSummary,
           timestamp: event.timestamp,
           tokenCount: estimateTokens(conciseSummary),
+          threadId: this.activeDiscussionThread?.threadId,
+          taskType: taskType || this.current.taskType || undefined,
         };
         this.recentTurns.push(turn);
         if (this.recentTurns.length > 20) {
@@ -303,21 +334,33 @@ export class InterviewContextManager {
             lastAnswerSummary: update.lastAnswerSummary,
             startedAt: event.timestamp,
             turnCount: 1,
+            entities: extractEntitiesFromText(update.parentTopic),
           };
         }
         break;
       }
 
       case 'FACT_ESTABLISHED': {
-        const { category, fact } = input.payload;
-        this.stableFacts.push({
-          factId: `fact_${this.sequenceNumber}`,
-          category,
-          fact,
-          establishedAt: event.timestamp,
-        });
-        if (this.stableFacts.length > 15) {
-          this.stableFacts.shift();
+        const { category, fact, source = 'candidate' } = input.payload;
+        if (source === 'meoow') {
+          break; // Prohibit AI answer hallucinations from becoming permanent facts
+        }
+        const cleanFact = String(fact || '').trim();
+        if (!cleanFact) break;
+
+        const exists = this.stableFacts.some(
+          f => f.category === category && f.fact.toLowerCase() === cleanFact.toLowerCase()
+        );
+        if (!exists) {
+          this.stableFacts.push({
+            factId: `fact_${this.sequenceNumber}`,
+            category,
+            fact: cleanFact,
+            establishedAt: event.timestamp,
+          });
+          if (this.stableFacts.length > 15) {
+            this.stableFacts.shift();
+          }
         }
         break;
       }
@@ -478,116 +521,26 @@ export class InterviewContextManager {
   }
 
   /**
-   * Build a bounded context payload bounded by target token budget (~750 tokens).
-   * Uses priority-based pruning:
-   * CURRENT > ACTIVE THREAD > LATEST SCREEN > RECENT RELEVANT > STABLE FACTS > OLD SUMMARY.
+   * Build a bounded context payload bounded by target token budget.
+   * Uses canonical intelligent context selection:
+   * CURRENT QUESTION + ACTIVE THREAD + RELEVANT PRIOR TURNS + RELEVANT STABLE FACTS + SCREEN.
    */
-  public getBoundedContext(targetTokenBudget: number = 750): BoundedContextPayload {
-    let budgetRemaining = targetTokenBudget;
-
-    // 1. Priority 1: CURRENT (question, userPrompt, taskType)
-    const currentQuestion = this.current.question;
-    const userPrompt = this.current.userPrompt;
-    const taskType = this.current.taskType;
-
-    budgetRemaining -= estimateTokens(currentQuestion);
-    budgetRemaining -= estimateTokens(userPrompt);
-
-    // 2. Priority 2: ACTIVE THREAD
-    let activeThread: BoundedContextPayload['activeThread'] = null;
-    if (this.activeDiscussionThread) {
-      activeThread = {
-        parentTopic: this.activeDiscussionThread.parentTopic,
-        taskType: this.activeDiscussionThread.taskType,
-        decisions: [...this.activeDiscussionThread.establishedDecisions],
-      };
-      budgetRemaining -= estimateTokens(activeThread.parentTopic);
-      for (const d of activeThread.decisions) {
-        budgetRemaining -= estimateTokens(d);
-      }
-    }
-
-    // 3. Priority 3: LATEST SCREEN (problem + entities + code)
-    let screenObservation: BoundedContextPayload['screenObservation'] = null;
-    if (this.current.latestScreenObservation) {
-      const obs = this.current.latestScreenObservation;
-      screenObservation = {
-        problem: obs.primaryQuestionOrProblem,
-        entities: [...obs.keyEntitiesAndConstraints],
-        codeSnippet: obs.codeSnippet,
-      };
-      budgetRemaining -= estimateTokens(screenObservation.problem);
-      for (const e of screenObservation.entities) {
-        budgetRemaining -= estimateTokens(e);
-      }
-      if (screenObservation.codeSnippet) {
-        budgetRemaining -= estimateTokens(screenObservation.codeSnippet);
-      }
-    }
-
-    // 4. Priority 4: RECENT RELEVANT TURNS (reverse chronological until budget exhausted)
-    const recentTurns: Array<{
-      speaker: 'interviewer' | 'candidate' | 'meoow';
-      source?: 'audio' | 'screen' | 'manual';
-      text: string;
-    }> = [];
-    for (let i = this.recentTurns.length - 1; i >= 0; i--) {
-      const turn = this.recentTurns[i];
-      const cost = turn.tokenCount || estimateTokens(turn.text);
-      if (budgetRemaining - cost < 50 && recentTurns.length >= 2) {
-        // Stop adding turns when budget is getting tight, but keep at least 2 turns if possible
-        break;
-      }
-      recentTurns.unshift({
-        speaker: turn.speaker,
-        source: turn.source,
-        text: turn.text,
-      });
-      budgetRemaining -= cost;
-    }
-
-    // 5. Priority 5: STABLE FACTS
-    const stableFacts: string[] = [];
-    for (const factObj of this.stableFacts) {
-      const cost = estimateTokens(factObj.fact);
-      if (budgetRemaining - cost >= 30) {
-        stableFacts.push(factObj.fact);
-        budgetRemaining -= cost;
-      }
-    }
-
-    // 6. Priority 6: SUMMARY (Lowest priority: only included if budget allows)
-    let summary: string | null = null;
-    if (this.rollingSummary && budgetRemaining >= estimateTokens(this.rollingSummary)) {
-      summary = this.rollingSummary;
-      budgetRemaining -= estimateTokens(summary);
-    }
-
-    // Candidate profile (compact)
-    const candidateProfile = {
-      role: this.candidateFacts.jobTitle,
-      level: this.candidateFacts.experienceLevel,
-      skills: this.candidateFacts.keySkills,
-      mode: this.candidateFacts.mode,
-    };
-
-    const totalUsed = targetTokenBudget - Math.max(0, budgetRemaining);
-
-    return {
+  public getBoundedContext(requestType?: RequestType, targetTokenBudget?: number): BoundedContextPayload {
+    const question = this.current.question || this.current.userPrompt || '';
+    return selectIntelligentContext({
       contextVersion: this.contextVersion,
-      estimatedTokens: totalUsed,
-      current: {
-        question: currentQuestion,
-        userPrompt,
-        taskType,
-      },
-      activeThread,
-      screenObservation,
-      recentTurns,
-      stableFacts,
-      summary,
-      candidateProfile,
-    };
+      question,
+      userPrompt: this.current.userPrompt,
+      taskType: this.current.taskType,
+      activeThread: this.activeDiscussionThread,
+      latestScreenObservation: this.current.latestScreenObservation,
+      recentTurns: this.recentTurns,
+      stableFacts: this.stableFacts,
+      candidateFacts: this.candidateFacts,
+      rollingSummary: this.rollingSummary,
+      requestTypeOverride: requestType,
+      targetTokenBudgetOverride: targetTokenBudget,
+    });
   }
 
   /**
@@ -648,8 +601,8 @@ export class InterviewContextManager {
   /**
    * Alias for getBoundedContext to build bounded context payload.
    */
-  public buildBoundedContextPayload(targetTokenBudget: number = 750): BoundedContextPayload {
-    return this.getBoundedContext(targetTokenBudget);
+  public buildBoundedContextPayload(requestType?: RequestType, targetTokenBudget?: number): BoundedContextPayload {
+    return this.getBoundedContext(requestType, targetTokenBudget);
   }
 
   /**

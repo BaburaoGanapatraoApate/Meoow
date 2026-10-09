@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('meow', {
   checkScreenPermission: () => ipcRenderer.invoke('check-screen-permission'),
   requestScreenPermission: () => ipcRenderer.invoke('request-screen-permission'),
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
+  setOverlayHiddenForCapture: (hidden: boolean) => ipcRenderer.invoke('capture:set-overlay-hidden', hidden),
   minimizeToTray: () => ipcRenderer.invoke('app:minimize-to-tray'),
   showApp: () => ipcRenderer.invoke('app:show'),
   getWindowBounds: () => ipcRenderer.invoke('window:get-bounds'),
@@ -30,6 +31,7 @@ contextBridge.exposeInMainWorld('meow', {
   setIgnoreMouseEvents: (ignore: boolean) => ipcRenderer.send('window:set-ignore-mouse-events', ignore),
   setFocusable: (focusable: boolean) => ipcRenderer.send('window:set-focusable', focusable),
   setInputFocus: (focused: boolean) => ipcRenderer.send('window:set-input-focus', focused),
+  setMcqMultiCaptureMode: (enabled: boolean) => ipcRenderer.send('shortcut:set-mcq-capture-mode', enabled),
   requestFocus: () => ipcRenderer.send('window:request-focus'),
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
 
@@ -48,6 +50,11 @@ contextBridge.exposeInMainWorld('meow', {
     const listener = () => cb();
     ipcRenderer.on('shortcut:analyze-screen', listener);
     return () => ipcRenderer.off('shortcut:analyze-screen', listener);
+  },
+  onFinishMcqCaptureShortcut: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on('shortcut:finish-mcq-capture', listener);
+    return () => ipcRenderer.off('shortcut:finish-mcq-capture', listener);
   },
   onAudioData: (cb: (data: number[]) => void) => {
     const listener = (_e: any, data: number[]) => cb(data);

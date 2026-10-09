@@ -216,7 +216,97 @@ export const GROQ_MODELS: GroqModel[] = [
   { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B', badge: 'Fast' },
 ];
 
-export const VISION_MODEL = 'qwen/qwen3.6-27b';
+export const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b';
+export const FALLBACK_VISION_MODEL = 'qwen/qwen3.8-27b';
+export const ALLOWED_VISION_MODELS = [
+  'qwen/qwen3.8-27b',
+] as const;
+
+export const VISION_MODEL = DEFAULT_VISION_MODEL;
+
+export interface ClientModelMetadata {
+  id: string;
+  displayName: string;
+  visionSupported: boolean;
+  textSupported: boolean;
+  reasoningSupported: boolean;
+  reasoningOutputMode: 'hidden' | 'raw' | 'parsed' | 'none';
+  modality: 'text' | 'multimodal';
+  purpose: 'chat' | 'vision' | 'chat_and_vision';
+  status: 'active' | 'preview' | 'fallback' | 'supported' | 'deprecated';
+  /**
+   * Application-level request output token cap for Meoow generation (not provider hardware ceiling).
+   * - Qwen 3.6 vision: 800 tokens
+   * - Qwen 3.8 vision fallback: 1024 tokens
+   * - Text models: 1024 tokens
+   */
+  maxOutputTokens: number;
+  /** Explicit alias clarifying that this is Meoow's application request budget */
+  appMaxTokens?: number;
+}
+
+export const CLIENT_MODEL_REGISTRY: Record<string, ClientModelMetadata> = {
+  'qwen/qwen3.8-27b': {
+    id: 'qwen/qwen3.8-27b',
+    displayName: 'Qwen 3.8 27B',
+    visionSupported: true,
+    textSupported: true,
+    reasoningSupported: true,
+    reasoningOutputMode: 'hidden',
+    modality: 'multimodal',
+    purpose: 'chat_and_vision',
+    status: 'preview',
+    maxOutputTokens: 1024,
+  },
+  'openai/gpt-oss-120b': {
+    id: 'openai/gpt-oss-120b',
+    displayName: 'GPT OSS 120B',
+    visionSupported: false,
+    textSupported: true,
+    reasoningSupported: false,
+    reasoningOutputMode: 'none',
+    modality: 'text',
+    purpose: 'chat',
+    status: 'fallback',
+    maxOutputTokens: 1024,
+  },
+  'openai/gpt-oss-20b': {
+    id: 'openai/gpt-oss-20b',
+    displayName: 'GPT OSS 20B',
+    visionSupported: false,
+    textSupported: true,
+    reasoningSupported: false,
+    reasoningOutputMode: 'none',
+    modality: 'text',
+    purpose: 'chat',
+    status: 'supported',
+    maxOutputTokens: 1024,
+  },
+  'groq/compound-mini': {
+    id: 'groq/compound-mini',
+    displayName: 'Compound Mini',
+    visionSupported: false,
+    textSupported: true,
+    reasoningSupported: false,
+    reasoningOutputMode: 'none',
+    modality: 'text',
+    purpose: 'chat',
+    status: 'supported',
+    maxOutputTokens: 1024,
+  },
+  'groq/compound': {
+    id: 'groq/compound',
+    displayName: 'Compound',
+    visionSupported: false,
+    textSupported: true,
+    reasoningSupported: false,
+    reasoningOutputMode: 'none',
+    modality: 'text',
+    purpose: 'chat',
+    status: 'supported',
+    maxOutputTokens: 1024,
+  },
+};
 
 // ─── Interview Rounds ───
 export interface InterviewRound {
@@ -253,7 +343,8 @@ export interface MeowAPI {
   getProtectionSupported(): Promise<boolean>;
   checkScreenPermission(): Promise<boolean>;
   requestScreenPermission(): Promise<boolean>;
-  getScreenSources(): Promise<Array<{ id: string; name: string; display_id: string; isPrimary: boolean }>>;
+  getScreenSources(): Promise<Array<{ id: string; name: string; display_id: string; isPrimary: boolean; isCurrent?: boolean }>>;
+  setOverlayHiddenForCapture(hidden: boolean): Promise<boolean>;
   minimizeToTray(): Promise<void>;
   showApp(): Promise<void>;
   getWindowBounds(): Promise<{ x: number; y: number; width: number; height: number } | null>;
@@ -282,6 +373,7 @@ export interface MeowAPI {
   setIgnoreMouseEvents(ignore: boolean): void;
   setFocusable(focusable: boolean): void;
   setInputFocus(focused: boolean): void;
+  setMcqMultiCaptureMode(enabled: boolean): void;
   requestFocus(): void;
   openExternal(url: string): void;
 
@@ -289,6 +381,7 @@ export interface MeowAPI {
   onProtectionSupported(cb: (supported: boolean) => void): () => void;
   onScreenPermissionStatus(cb: (hasPermission: boolean) => void): () => void;
   onAnalyzeScreenShortcut(cb: () => void): () => void;
+  onFinishMcqCaptureShortcut(cb: () => void): () => void;
   onAudioData(cb: (data: number[]) => void): () => void;
   onAudioCaptureStarted(cb: () => void): () => void;
   onAudioCaptureStopped(cb: () => void): () => void;
@@ -361,13 +454,17 @@ export interface DialogueTurn {
   text: string;
   timestamp: string;
   tokenCount: number;
+  threadId?: string;
+  taskType?: TaskType;
 }
 
 export interface EstablishedFact {
   factId: string;
   category: 'architecture' | 'decision' | 'constraint' | 'candidate_fact';
   fact: string;
+  source?: 'candidate' | 'interviewer' | 'verified_resume' | 'explicit_constraint';
   establishedAt: string;
+  isSuperseded?: boolean;
 }
 
 export interface ActiveDiscussionThread {
@@ -379,6 +476,8 @@ export interface ActiveDiscussionThread {
   lastAnswerSummary?: string;
   startedAt: string;
   turnCount: number;
+  entities?: string[];
+  isClosed?: boolean;
 }
 
 export interface CandidateFacts {
@@ -431,8 +530,34 @@ export interface ContextEvent {
   payload: any;
 }
 
+export type ContextCategory =
+  | 'CURRENT_QUESTION'
+  | 'ACTIVE_THREAD'
+  | 'RELEVANT_PRIOR_TURN'
+  | 'STABLE_FACT'
+  | 'RESUME_FACT'
+  | 'SCREEN_OBSERVATION'
+  | 'TASK_METADATA'
+  | 'CONTINUATION_CONTEXT';
+
+export type RequestType =
+  | 'TEXT_CHAT'
+  | 'CONTINUATION'
+  | 'SCREEN'
+  | 'RESUME_DRILLDOWN'
+  | 'MCQ'
+  | 'CODING'
+  | 'SQL'
+  | 'CONCEPTUAL'
+  | 'BEHAVIORAL'
+  | 'ML_DESIGN'
+  | 'SYSTEM_DESIGN'
+  | 'CASE_STUDY';
+
 export interface BoundedContextPayload {
   contextVersion: number;
+  relevantContextSignature?: string;
+  requestType?: RequestType;
   estimatedTokens: number;
   current: {
     question: string | null;
@@ -453,8 +578,10 @@ export interface BoundedContextPayload {
     speaker: 'interviewer' | 'candidate' | 'meoow';
     source?: 'audio' | 'screen' | 'manual';
     text: string;
+    relevanceReason?: string;
   }>;
   stableFacts: string[];
+  resumeContext?: string | null;
   summary: string | null;
   candidateProfile: {
     role: string;

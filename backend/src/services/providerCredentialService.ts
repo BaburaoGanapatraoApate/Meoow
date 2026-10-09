@@ -21,6 +21,34 @@ export interface UserProviderStatus {
 }
 
 /**
+ * Check and resolve user-specific provider override from database (BYOK).
+ * Returns decrypted API key if override exists, or null if user uses the provider pool.
+ */
+export async function getUserProviderOverride(
+  userId: string,
+  provider: "groq" | "deepgram"
+): Promise<string | null> {
+  if (!userId) return null;
+
+  const res = await pool.query(
+    `SELECT encrypted_api_key, iv, auth_tag, encryption_version
+     FROM provider_credentials
+     WHERE user_id = $1 AND provider = $2`,
+    [userId, provider]
+  );
+
+  if (res.rows.length === 0) return null;
+
+  const row = res.rows[0];
+  return decryptCredential({
+    ciphertext: row.encrypted_api_key,
+    iv: row.iv,
+    authTag: row.auth_tag,
+    version: row.encryption_version,
+  });
+}
+
+/**
  * Resolve Groq API key for a specific user:
  * - If user has an encrypted override in database, decrypt and return it.
  * - Otherwise return the default GROQ_API_KEY from environment.

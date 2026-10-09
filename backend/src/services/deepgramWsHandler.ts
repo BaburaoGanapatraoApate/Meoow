@@ -4,7 +4,8 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import { z } from "zod";
 import { DeepgramLiveSession, DeepgramLiveConfig } from "./deepgramService";
-import { resolveDeepgramCredential } from "./providerCredentialService";
+import { resolveDeepgramCredential, getUserProviderOverride } from "./providerCredentialService";
+import { providerKeyPool, getAuthoritativeUserRole, CredentialLease } from "./providerKeyPool";
 import { verifyDevice } from "./deviceService";
 import { pool } from "../db/database";
 
@@ -75,6 +76,7 @@ export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketS
     let isAuthenticated = false;
     let userId: string | null = null;
     let deepgramSession: DeepgramLiveSession | null = null;
+    let currentLease: CredentialLease | null = null;
     let authTimeout: NodeJS.Timeout | null = null;
     let hasCleanedUp = false;
 
@@ -117,6 +119,11 @@ export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketS
       if (deepgramSession) {
         deepgramSession.close();
         deepgramSession = null;
+      }
+
+      if (currentLease) {
+        currentLease.release();
+        currentLease = null;
       }
     };
 
@@ -274,59 +281,151 @@ export function setupDeepgramWebSocketServer(httpServer: HttpServer): WebSocketS
               authTimeout = null;
             }
 
-            // Resolve user-specific Deepgram API key (override or environment default)
-            const deepgramApiKey = await resolveDeepgramCredential(authenticatedUserId);
+            // Resolve user-specific Deepgram API key (override or managed ProviderKeyPool)
+            const dbOverrideKey = await getUserProviderOverride(authenticatedUserId, "deepgram");
+            const userRole = await getAuthoritativeUserRole(authenticatedUserId);
 
-            // Configure and initialize Deepgram live session
+            // Configure Deepgram live session
             const dgConfig: DeepgramLiveConfig = {
               language,
             };
 
-            deepgramSession = new DeepgramLiveSession(
-              dgConfig,
-              {
-                onMessage: (dgMsg) => {
-                  if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(JSON.stringify(dgMsg));
-                  }
+            if (dbOverrideKey) {
+              deepgramSession = new DeepgramLiveSession(
+                dgConfig,
+                {
+                  onMessage: (dgMsg) => {
+                    if (clientWs.readyState === WebSocket.OPEN) {
+                      clientWs.send(JSON.stringify(dgMsg));
+                    }
+                  },
+                  onOpen: () => {
+                    if (clientWs.readyState === WebSocket.OPEN) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "ready",
+                          userId,
+                        })
+                      );
+                    }
+                  },
+                  onClose: (code, reason) => {
+                    if (clientWs.readyState === WebSocket.OPEN) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "closed",
+                          code,
+                          reason,
+                        })
+                      );
+                    }
+                  },
+                  onError: (_err) => {
+                    if (clientWs.readyState === WebSocket.OPEN) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "error",
+                          code: "TRANSCRIPTION_PROVIDER_ERROR",
+                          message: "Deepgram transcription error occurred.",
+                        })
+                      );
+                    }
+                  },
                 },
-                onOpen: () => {
-                  if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(
-                      JSON.stringify({
-                        type: "ready",
-                        userId,
-                      })
-                    );
-                  }
-                },
-                onClose: (code, reason) => {
-                  if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(
-                      JSON.stringify({
-                        type: "closed",
-                        code,
-                        reason,
-                      })
-                    );
-                  }
-                },
-                onError: (_err) => {
-                  if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(
-                      JSON.stringify({
-                        type: "error",
-                        code: "TRANSCRIPTION_PROVIDER_ERROR",
-                        message: "Deepgram transcription error occurred.",
-                      })
-                    );
-                  }
-                },
-              },
-              deepgramApiKey
-            );
+                dbOverrideKey
+              );
+              await deepgramSession.connect();
+            } else {
+              const attemptedIds = new Set<string>();
+              const eligibleCount = providerKeyPool.getEligibleCount({
+                provider: "deepgram",
+                role: userRole,
+              });
+              const maxAttempts = Math.min(3, eligibleCount || 1);
+              let connected = false;
 
-            await deepgramSession.connect();
+              while (attemptedIds.size < maxAttempts && !connected) {
+                const lease = providerKeyPool.acquireCredential({
+                  provider: "deepgram",
+                  role: userRole,
+                  excludeIds: attemptedIds,
+                });
+
+                if (!lease) break;
+                attemptedIds.add(lease.credentialId);
+                currentLease = lease;
+
+                try {
+                  const session = new DeepgramLiveSession(
+                    dgConfig,
+                    {
+                      onMessage: (dgMsg) => {
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(JSON.stringify(dgMsg));
+                        }
+                      },
+                      onOpen: () => {
+                        providerKeyPool.recordSuccess(lease.credentialId);
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(
+                            JSON.stringify({
+                              type: "ready",
+                              userId,
+                            })
+                          );
+                        }
+                      },
+                      onClose: (code, reason) => {
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(
+                            JSON.stringify({
+                              type: "closed",
+                              code,
+                              reason,
+                            })
+                          );
+                        }
+                      },
+                      onError: (err) => {
+                        providerKeyPool.recordError(lease.credentialId, err);
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(
+                            JSON.stringify({
+                              type: "error",
+                              code: "TRANSCRIPTION_PROVIDER_ERROR",
+                              message: "Deepgram transcription error occurred.",
+                            })
+                          );
+                        }
+                      },
+                    },
+                    lease.apiKey
+                  );
+
+                  await session.connect();
+                  deepgramSession = session;
+                  connected = true;
+                  // currentLease remains active until session close
+                } catch (connErr: any) {
+                  providerKeyPool.recordError(lease.credentialId, connErr);
+                  lease.release();
+                  currentLease = null;
+                }
+              }
+
+              if (!connected) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "error",
+                    code: "TRANSCRIPTION_UNAVAILABLE",
+                    message: "Transcription service is temporarily unavailable. Please try again shortly.",
+                  })
+                );
+                clientWs.close(4429, "Transcription service unavailable");
+                cleanup();
+                return;
+              }
+            }
           } catch (err: any) {
             clientWs.send(
               JSON.stringify({

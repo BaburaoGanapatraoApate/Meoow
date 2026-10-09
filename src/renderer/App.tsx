@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Header, { formatCooldown } from './components/Header';
 import { SessionSetup } from './components/SessionSetup';
+import { McqAssistantSetup, type McqAssistantConfig } from './components/McqAssistantSetup';
+import { McqAssistantPanel, type McqCapture } from './components/McqAssistantPanel';
 import { AnswersPanel } from './components/AnswersPanel';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { ToastProvider, useToast } from './components/Toast';
@@ -8,6 +10,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { DeviceLimitModal } from './components/DeviceLimitModal';
 import { GroqClient } from './services/groqClient';
+import { analyzeMcqScreenshot as requestMcqAnalysis } from './services/mcqAssistantClient';
 import { createDeepgramManager, type DeepgramMessageEvent } from './services/deepgramClient';
 import {
   createSession as createLocalSession,
@@ -101,6 +104,13 @@ function MeowApp() {
   const [isDeepgramConnected, setIsDeepgramConnected] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeCooldown, setAnalyzeCooldown] = useState(0);
+  const [isShowingMcqAssistantSetup, setIsShowingMcqAssistantSetup] = useState(false);
+  const [isMcqAssistantActive, setIsMcqAssistantActive] = useState(false);
+  const [mcqAssistantConfig, setMcqAssistantConfig] = useState<McqAssistantConfig | null>(null);
+  const [mcqAssistantStatus, setMcqAssistantStatus] = useState<'ready' | 'processing' | 'answer-ready' | 'error'>('ready');
+  const [mcqAssistantAnswer, setMcqAssistantAnswer] = useState('');
+  const [isMultiCaptureActive, setIsMultiCaptureActive] = useState(false);
+  const [mcqCaptures, setMcqCaptures] = useState<McqCapture[]>([]);
 
   // ── Refs ──
   const isAnalyzingScreenRef = useRef(false);
@@ -143,19 +153,39 @@ function MeowApp() {
   const finalizeCallbackRef = useRef<(() => void) | null>(null);
   const sequenceRef = useRef(0);
   const streamingAnswerRef = useRef('');
+  const mcqAnalysisControllerRef = useRef<AbortController | null>(null);
+  const mcqCapturesRef = useRef<McqCapture[]>([]);
+  const mcqCollectionVersionRef = useRef(0);
 
   // ── Sync refs ──
   useEffect(() => { autoAnswerRef.current = autoAnswer; }, [autoAnswer]);
   useEffect(() => { groqClientRef.current = groqClient; }, [groqClient]);
   useEffect(() => { zeroCreditCountdownRef.current = zeroCreditCountdown; }, [zeroCreditCountdown]);
+  useEffect(() => { mcqCapturesRef.current = mcqCaptures; }, [mcqCaptures]);
+  useEffect(() => {
+    window.meow?.setMcqMultiCaptureMode?.(isMcqAssistantActive && isMultiCaptureActive);
+    return () => window.meow?.setMcqMultiCaptureMode?.(false);
+  }, [isMcqAssistantActive, isMultiCaptureActive]);
 
   // ── Click-through setup (only active during live session) ──
-  useEffect(() => setupClickThrough(isSessionStarted), [isSessionStarted]);
+  useEffect(() => setupClickThrough(isSessionStarted || isMcqAssistantActive), [isSessionStarted, isMcqAssistantActive]);
 
   // ── Cleanup blob URLs ──
   useEffect(() => () => {
     screenshotUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    mcqCapturesRef.current.forEach(capture => URL.revokeObjectURL(capture.url));
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    mcqAnalysisControllerRef.current?.abort();
+    mcqAnalysisControllerRef.current = null;
+    mcqCollectionVersionRef.current += 1;
+    mcqCapturesRef.current.forEach(capture => URL.revokeObjectURL(capture.url));
+    mcqCapturesRef.current = [];
+    setMcqCaptures([]);
+    setIsMultiCaptureActive(false);
+  }, [isAuthenticated]);
 
   // ── Protection support check ──
   useEffect(() => {
@@ -315,7 +345,7 @@ function MeowApp() {
     });
 
     interviewContextManager.addInterviewerTurn(questionToAnswer);
-    const boundedContext = interviewContextManager.buildBoundedContextPayload();
+    const boundedContext = interviewContextManager.buildBoundedContextPayload(classification.taskType as any);
 
     if (autoAnswerRef.current && groqClientRef.current) {
       const reqId = groqClientRef.current.sendTranscript(
@@ -499,7 +529,10 @@ function MeowApp() {
   // ── Analyze screen shortcut ──
   useEffect(() => {
     const cleanup = window.meow?.onAnalyzeScreenShortcut?.(() => {
-      if (isSessionStarted) {
+      if (isMcqAssistantActive) {
+        if (isMultiCaptureActive) captureMcqCollectionScreen();
+        else analyzeMcqAssistantScreen();
+      } else if (isSessionStarted) {
         if (analyzeCooldownRef.current > 0) {
           toast.info(`Screen analysis is rate-limited. Please wait ~${formatCooldown(analyzeCooldownRef.current)}.`);
           return;
@@ -508,7 +541,14 @@ function MeowApp() {
       }
     });
     return () => cleanup?.();
-  }, [isSessionStarted]);
+  }, [isSessionStarted, isMcqAssistantActive, isMultiCaptureActive, mcqAssistantConfig]);
+
+  useEffect(() => {
+    const cleanup = window.meow?.onFinishMcqCaptureShortcut?.(() => {
+      if (isMcqAssistantActive && isMultiCaptureActive) finishMcqCaptureAnalysis();
+    });
+    return () => cleanup?.();
+  }, [isMcqAssistantActive, isMultiCaptureActive, mcqAssistantConfig]);
 
   // ── Get mic stream (with preferred device support) ──
   const getMicStream = async (preferredDeviceId?: string): Promise<MediaStream | null> => {
@@ -894,6 +934,225 @@ function MeowApp() {
   };
 
   // ── Analyze screen ──
+  const capturePrimaryScreen = async (maxWidth = 1920, maxHeight = 1080, quality = 0.8): Promise<Blob> => {
+    let stream: MediaStream | null = null;
+    let video: HTMLVideoElement | null = null;
+    let overlayHidden = false;
+    try {
+      overlayHidden = Boolean(await window.meow?.setOverlayHiddenForCapture?.(true));
+      if (overlayHidden) await new Promise(resolve => setTimeout(resolve, 90));
+      const sources = await window.meow?.getScreenSources?.();
+      const source = sources?.find((s: any) => s.isCurrent) || sources?.find((s: any) => s.isPrimary) || sources?.[0];
+      if (!source) throw new Error('No screen source found');
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id },
+        } as any,
+      });
+      video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+
+      let width = video.videoWidth || maxWidth;
+      let height = video.videoHeight || maxHeight;
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Screen capture is unavailable');
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(video, 0, 0, width, height);
+      const sample = context.getImageData(0, 0, width, height).data;
+      const sampleStride = Math.max(4, Math.floor(sample.length / (256 * 4)) * 4);
+      let min = 255;
+      let max = 0;
+      for (let index = 0; index < sample.length; index += sampleStride) {
+        const luminance = (sample[index] + sample[index + 1] + sample[index + 2]) / 3;
+        min = Math.min(min, luminance);
+        max = Math.max(max, luminance);
+      }
+      if (max - min < 2) throw new Error('Captured screen appears blank or protected');
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (!blob) throw new Error('Screenshot capture failed');
+      return blob;
+    } finally {
+      if (video) {
+        try {
+          video.pause();
+          video.srcObject = null;
+          video.load();
+          video.remove();
+        } catch {}
+      }
+      stream?.getTracks().forEach(track => track.stop());
+      if (overlayHidden) await window.meow?.setOverlayHiddenForCapture?.(false).catch(() => {});
+    }
+  };
+
+  const clearMcqCaptureCollection = () => {
+    mcqCapturesRef.current.forEach(capture => URL.revokeObjectURL(capture.url));
+    mcqCapturesRef.current = [];
+    setMcqCaptures([]);
+    mcqCollectionVersionRef.current += 1;
+  };
+
+  const captureMcqCollectionScreen = async () => {
+    if (!isMcqAssistantActive || !isMultiCaptureActive || isAnalyzingScreenRef.current) return;
+    isAnalyzingScreenRef.current = true;
+    setIsAnalyzing(true);
+    try {
+      const blob = await capturePrimaryScreen(1600, 900, 0.72);
+      if (blob.size > 1_350_000) throw new Error('Screenshot is too large. Capture a narrower view.');
+      const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+      const hash = Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, '0')).join('');
+      const current = mcqCapturesRef.current;
+      if (current[current.length - 1]?.hash === hash) {
+        toast.info('Duplicate capture ignored. Scroll before capturing again.');
+        return;
+      }
+      const capture: McqCapture = {
+        id: `${Date.now()}-${hash.slice(0, 8)}`,
+        blob,
+        url: URL.createObjectURL(blob),
+        hash,
+        createdAt: Date.now(),
+      };
+      const next = [...current, capture];
+      mcqCapturesRef.current = next;
+      setMcqCaptures(next);
+      setMcqAssistantStatus('ready');
+      setMcqAssistantAnswer('');
+      toast.success(`Capture ${next.length} added`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Capture failed. Check screen permission and try again.');
+    } finally {
+      isAnalyzingScreenRef.current = false;
+      setIsAnalyzing(false);
+    }
+  };
+
+  const startMcqMultiCapture = () => {
+    if (mcqAssistantStatus === 'processing') return;
+    clearMcqCaptureCollection();
+    setMcqAssistantAnswer('');
+    setMcqAssistantStatus('ready');
+    setIsMultiCaptureActive(true);
+    toast.info('Multi-Capture started. Use Ctrl + Shift + A for each part.');
+  };
+
+  const removeLastMcqCapture = () => {
+    const current = mcqCapturesRef.current;
+    const removed = current[current.length - 1];
+    if (!removed) return;
+    URL.revokeObjectURL(removed.url);
+    const next = current.slice(0, -1);
+    mcqCapturesRef.current = next;
+    setMcqCaptures(next);
+    mcqCollectionVersionRef.current += 1;
+  };
+
+  const cancelMcqCapture = () => {
+    clearMcqCaptureCollection();
+    setIsMultiCaptureActive(false);
+    setMcqAssistantStatus('ready');
+    setMcqAssistantAnswer('');
+    toast.info('Capture collection cancelled');
+  };
+
+  const finishMcqCaptureAnalysis = async () => {
+    if (!isMcqAssistantActive || !isMultiCaptureActive || !mcqAssistantConfig || isAnalyzingScreenRef.current) return;
+    const captures = [...mcqCapturesRef.current];
+    if (!captures.length) {
+      toast.warning('Question incomplete - add another capture');
+      setMcqAssistantAnswer('Question incomplete - add another capture');
+      setMcqAssistantStatus('error');
+      return;
+    }
+    const totalBytes = captures.reduce((sum, capture) => sum + capture.blob.size, 0);
+    if (totalBytes > 13_500_000) {
+      const message = 'Capture collection is too large. Remove unnecessary captures or retake narrower screenshots.';
+      setMcqAssistantAnswer(message);
+      setMcqAssistantStatus('error');
+      toast.error(message);
+      return;
+    }
+
+    isAnalyzingScreenRef.current = true;
+    setIsAnalyzing(true);
+    setMcqAssistantStatus('processing');
+    setMcqAssistantAnswer('');
+    const controller = new AbortController();
+    mcqAnalysisControllerRef.current = controller;
+    const version = mcqCollectionVersionRef.current;
+    try {
+      const answer = await requestMcqAnalysis(captures.map(capture => capture.blob), mcqAssistantConfig, controller.signal);
+      if (version !== mcqCollectionVersionRef.current || controller.signal.aborted) return;
+      setMcqAssistantAnswer(answer);
+      const recoverable = answer.startsWith('Question incomplete') || answer.startsWith('Question ambiguous') || answer.startsWith('Image unreadable');
+      setMcqAssistantStatus(recoverable ? 'error' : 'answer-ready');
+      if (!recoverable) {
+        clearMcqCaptureCollection();
+        setIsMultiCaptureActive(false);
+        toast.success('Answer Ready');
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError' && version === mcqCollectionVersionRef.current) {
+        const message = err?.message || 'MCQ analysis failed. Your captures were kept for retry.';
+        setMcqAssistantAnswer(message);
+        setMcqAssistantStatus('error');
+        toast.error(message);
+      }
+    } finally {
+      if (mcqAnalysisControllerRef.current === controller) mcqAnalysisControllerRef.current = null;
+      isAnalyzingScreenRef.current = false;
+      setIsAnalyzing(false);
+    }
+  };
+
+  const analyzeMcqAssistantScreen = async () => {
+    if (!isMcqAssistantActive || !mcqAssistantConfig || isAnalyzingScreenRef.current) return;
+    if (user?.email?.trim().toLowerCase() !== 'yeolekrushnar@gmail.com') {
+      toast.error('MCQ Assistant access is restricted.');
+      return;
+    }
+    isAnalyzingScreenRef.current = true;
+    setIsAnalyzing(true);
+    setMcqAssistantStatus('processing');
+    setMcqAssistantAnswer('');
+    toast.info('Processing MCQ screenshot…');
+
+    const controller = new AbortController();
+    mcqAnalysisControllerRef.current = controller;
+    try {
+      const blob = await capturePrimaryScreen(1600, 900, 0.72);
+      if (blob.size > 1_350_000) throw new Error('Screenshot is too large. Please try again.');
+      const answer = await requestMcqAnalysis([blob], mcqAssistantConfig, controller.signal);
+      setMcqAssistantAnswer(answer);
+      setMcqAssistantStatus(answer === 'No recognizable MCQ found.' ? 'error' : 'answer-ready');
+      if (answer !== 'No recognizable MCQ found.') toast.success('Answer Ready');
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        const message = err?.message || 'MCQ analysis failed. Please try again.';
+        setMcqAssistantAnswer(message);
+        setMcqAssistantStatus('error');
+        toast.error(message);
+      }
+    } finally {
+      if (mcqAnalysisControllerRef.current === controller) mcqAnalysisControllerRef.current = null;
+      isAnalyzingScreenRef.current = false;
+      setIsAnalyzing(false);
+    }
+  };
+
   const analyzeScreen = async () => {
     if (isAnalyzingScreenRef.current || analyzeCooldownRef.current > 0) {
       if (analyzeCooldownRef.current > 0) {
@@ -912,55 +1171,9 @@ function MeowApp() {
     isAnalyzingScreenRef.current = true;
     toast.info('Capturing screen for analysis...');
 
-    let stream: MediaStream | null = null;
-    let video: HTMLVideoElement | null = null;
-
     try {
-      const sources = await window.meow?.getScreenSources?.();
-      const source = sources?.find((s: any) => s.isPrimary || s.id?.startsWith('screen:')) || sources?.[0];
-      if (!source) throw new Error('No screen source found');
-
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: source.id,
-          },
-        } as any,
-      });
-
-      video = document.createElement('video');
-      video.muted = true;
-      video.playsInline = true;
-      video.srcObject = stream;
-      await video.play();
-
-      let targetWidth = video.videoWidth || 1920;
-      let targetHeight = video.videoHeight || 1080;
-      const MAX_WIDTH = 1920;
-      const MAX_HEIGHT = 1080;
-
-      if (targetWidth > MAX_WIDTH || targetHeight > MAX_HEIGHT) {
-        const ratio = Math.min(MAX_WIDTH / targetWidth, MAX_HEIGHT / targetHeight);
-        targetWidth = Math.round(targetWidth * ratio);
-        targetHeight = Math.round(targetHeight * ratio);
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-      }
-
-      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+      const blob = await capturePrimaryScreen();
       if (!blob || blob.size > 4 * 1024 * 1024) throw new Error('Screenshot too large or failed');
-
-      console.log(`[ScreenCapture] Captured JPEG: ${targetWidth}x${targetHeight}, ${(blob.size / 1024).toFixed(1)} KB`);
 
       // Revoke older object URLs to prevent Chromium memory leaks
       screenshotUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
@@ -971,7 +1184,10 @@ function MeowApp() {
       setCurrentStreamingScreenshot(url);
       currentStreamingScreenshotRef.current = url;
 
-      const requestId = await client.sendScreenCapture(blob);
+      const requestId = await client.sendScreenCapture(
+        blob,
+        interviewContextManager.buildBoundedContextPayload('SCREEN')
+      );
       if (requestId) {
         setAnswerScreenshots(prev => ({ ...prev, [new Date().toISOString()]: url }));
       } else {
@@ -982,21 +1198,6 @@ function MeowApp() {
       setIsAnalyzing(false);
       isAnalyzingScreenRef.current = false;
       toast.error('Screen analysis failed: ' + (err.message || 'Unknown error'));
-    } finally {
-      // Explicitly detach and unload HTMLVideoElement to release Chromium Direct3D11 / MediaFoundation decoders
-      if (video) {
-        try {
-          video.pause();
-          video.srcObject = null;
-          video.load();
-          video.remove();
-        } catch {}
-      }
-      if (stream) {
-        try {
-          stream.getTracks().forEach(t => t.stop());
-        } catch {}
-      }
     }
   };
 
@@ -1015,7 +1216,7 @@ function MeowApp() {
     });
 
     interviewContextManager.setManualQuestion(question, classification.taskType);
-    const boundedContext = interviewContextManager.buildBoundedContextPayload();
+    const boundedContext = interviewContextManager.buildBoundedContextPayload(classification.taskType as any);
 
     client.sendManualQuestion(question, selectedLanguage, classification, boundedContext);
   };
@@ -1037,7 +1238,7 @@ function MeowApp() {
         interviewRound: sessionData?.interview_round,
         candidateProfile: contextSnapshot.candidateFacts,
       });
-      const boundedContext = interviewContextManager.buildBoundedContextPayload();
+      const boundedContext = interviewContextManager.buildBoundedContextPayload(classification.taskType as any);
       client.sendTranscript(recent, false, 'manual', selectedLanguage, classification, boundedContext);
     }
   };
@@ -1129,6 +1330,43 @@ function MeowApp() {
     micStream?.getAudioTracks().forEach(t => { t.enabled = next; });
   };
 
+  const openMcqAssistantSetup = () => {
+    if (user?.email?.trim().toLowerCase() !== 'yeolekrushnar@gmail.com') return;
+    setIsShowingSetup(false);
+    setIsShowingMcqAssistantSetup(true);
+  };
+
+  const startMcqAssistant = (config: McqAssistantConfig) => {
+    if (user?.email?.trim().toLowerCase() !== 'yeolekrushnar@gmail.com') {
+      toast.error('MCQ Assistant access is restricted.');
+      return;
+    }
+    setMcqAssistantConfig(config);
+    setSelectedLanguage(config.language);
+    setMcqAssistantAnswer('');
+    setMcqAssistantStatus('ready');
+    clearMcqCaptureCollection();
+    setIsMultiCaptureActive(false);
+    setIsShowingMcqAssistantSetup(false);
+    setIsMcqAssistantActive(true);
+    toast.success('MCQ Assistant started. Press Ctrl + Shift + A to analyze.');
+  };
+
+  const endMcqAssistant = () => {
+    mcqAnalysisControllerRef.current?.abort();
+    mcqAnalysisControllerRef.current = null;
+    isAnalyzingScreenRef.current = false;
+    setIsAnalyzing(false);
+    setIsMcqAssistantActive(false);
+    setIsShowingMcqAssistantSetup(false);
+    setMcqAssistantConfig(null);
+    setMcqAssistantAnswer('');
+    setMcqAssistantStatus('ready');
+    clearMcqCaptureCollection();
+    setIsMultiCaptureActive(false);
+    toast.success('MCQ Assistant ended');
+  };
+
   // ── Render ──
   if (isLoading) {
     return (
@@ -1183,7 +1421,9 @@ function MeowApp() {
         pendingCopilotWork={pendingCopilotWork}
         onReconnectCopilot={() => {}}
         onEnd={endSession}
-        onAnalyzeScreen={analyzeScreen}
+        onAnalyzeScreen={isMcqAssistantActive
+          ? (isMultiCaptureActive ? captureMcqCollectionScreen : analyzeMcqAssistantScreen)
+          : analyzeScreen}
         isAnalyzing={isAnalyzing}
         analyzeCooldown={analyzeCooldown}
         isMicEnabled={isMicEnabled}
@@ -1192,6 +1432,11 @@ function MeowApp() {
         onOpenPurchaseModal={() => setIsPurchaseModalOpen(true)}
         onClosePurchaseModal={() => setIsPurchaseModalOpen(false)}
         zeroCreditCountdown={zeroCreditCountdown}
+        isMcqAssistantActive={isMcqAssistantActive}
+        isShowingMcqAssistantSetup={isShowingMcqAssistantSetup}
+        onStartMcqAssistant={openMcqAssistantSetup}
+        onEndMcqAssistant={endMcqAssistant}
+        isMcqMultiCaptureActive={isMultiCaptureActive}
       />
 
       {!isProtectionSupported && (
@@ -1211,6 +1456,29 @@ function MeowApp() {
           isStarting={isStartingSession}
           hasZeroCredits={hasZeroCredits}
           onOpenBuyCredits={() => setIsPurchaseModalOpen(true)}
+        />
+      )}
+
+      {isShowingMcqAssistantSetup && !isSessionStarted && !isMcqAssistantActive && (
+        <McqAssistantSetup
+          initialLanguage={selectedLanguage}
+          onStart={startMcqAssistant}
+          onCancel={() => setIsShowingMcqAssistantSetup(false)}
+        />
+      )}
+
+      {isMcqAssistantActive && mcqAssistantConfig && (
+        <McqAssistantPanel
+          config={mcqAssistantConfig}
+          status={mcqAssistantStatus}
+          answer={mcqAssistantAnswer}
+          multiCaptureActive={isMultiCaptureActive}
+          captures={mcqCaptures}
+          onStartMultiCapture={startMcqMultiCapture}
+          onAddCapture={captureMcqCollectionScreen}
+          onFinish={finishMcqCaptureAnalysis}
+          onRemoveLast={removeLastMcqCapture}
+          onCancelCapture={cancelMcqCapture}
         />
       )}
 
