@@ -1019,8 +1019,8 @@ function MeowApp() {
     isAnalyzingScreenRef.current = true;
     setIsAnalyzing(true);
     try {
-      const blob = await capturePrimaryScreen(1600, 900, 0.72);
-      if (blob.size > 1_350_000) throw new Error('Screenshot is too large. Capture a narrower view.');
+      const blob = await capturePrimaryScreen(1920, 1080, 0.85);
+      if (blob.size > 2_500_000) throw new Error('Screenshot is too large. Capture a narrower view.');
       const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
       const hash = Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, '0')).join('');
       const current = mcqCapturesRef.current;
@@ -1157,8 +1157,8 @@ function MeowApp() {
     const controller = new AbortController();
     mcqAnalysisControllerRef.current = controller;
     try {
-      const blob = await capturePrimaryScreen(1600, 900, 0.72);
-      if (blob.size > 1_350_000) throw new Error('Screenshot is too large. Please try again.');
+      const blob = await capturePrimaryScreen(1920, 1080, 0.85);
+      if (blob.size > 2_500_000) throw new Error('Screenshot is too large. Please try again.');
       const result = await requestMcqAnalysis([blob], mcqAssistantConfig, controller.signal);
       setMcqAssistantAnswer(result.answer);
       setMcqIncompleteNotification(result.incompleteNotification || '');

@@ -83,6 +83,114 @@ export function validateSingleAnswer(raw: string): string | null {
   return normalized.join("; ");
 }
 
+export function checkDivisibility(stem: string, options: Record<string, string>): { letter: string; text: string; reason: string } | null {
+  const isLargest = /(?:largest|greatest|maximum|highest)/i.test(stem);
+  const isSmallest = /(?:smallest|least|minimum|lowest)/i.test(stem);
+  const divMatch = stem.match(/(?:divisible by|multiple of)\s*(\d+)/i);
+  if (!divMatch) return null;
+
+  const divisor = parseInt(divMatch[1], 10);
+  if (isNaN(divisor) || divisor <= 0) return null;
+
+  const validDivisible: Array<{ letter: string; text: string; num: number }> = [];
+  for (const [letter, text] of Object.entries(options)) {
+    const num = parseInt(text.replace(/[^\d-]/g, ""), 10);
+    if (!isNaN(num) && num % divisor === 0) {
+      validDivisible.push({ letter, text, num });
+    }
+  }
+
+  if (validDivisible.length === 0) return null;
+
+  if (isLargest) {
+    validDivisible.sort((a, b) => b.num - a.num);
+    const best = validDivisible[0];
+    return { letter: best.letter, text: best.text, reason: `Largest number divisible by ${divisor} is ${best.num}` };
+  } else if (isSmallest) {
+    validDivisible.sort((a, b) => a.num - b.num);
+    const best = validDivisible[0];
+    return { letter: best.letter, text: best.text, reason: `Smallest number divisible by ${divisor} is ${best.num}` };
+  }
+
+  if (validDivisible.length === 1) {
+    return { letter: validDivisible[0].letter, text: validDivisible[0].text, reason: `Only option divisible by ${divisor} is ${validDivisible[0].num}` };
+  }
+
+  return null;
+}
+
+export function checkRemainder(stem: string, options: Record<string, string>): { letter: string; text: string; reason: string } | null {
+  const m = stem.match(/dividing.*?by\s*(\d+)[^.]*?(\d+)\s+as\s+remainder.*?dividing.*?by\s*(\d+)/i);
+  if (!m) return null;
+
+  const d1 = parseInt(m[1], 10);
+  const r1 = parseInt(m[2], 10);
+  const d2 = parseInt(m[3], 10);
+
+  if (isNaN(d1) || isNaN(r1) || isNaN(d2) || d2 <= 0) return null;
+
+  if (d1 % d2 === 0) {
+    const expectedRemainder = r1 % d2;
+    for (const [letter, text] of Object.entries(options)) {
+      const num = parseInt(text.replace(/[^\d-]/g, ""), 10);
+      if (num === expectedRemainder) {
+        return { letter, text, reason: `${d1} is divisible by ${d2}, so remainder is ${r1} % ${d2} = ${expectedRemainder}` };
+      }
+    }
+  }
+  return null;
+}
+
+export function checkNotPrime(stem: string, options: Record<string, string>): { letter: string; text: string; reason: string } | null {
+  if (!/not\s+a\s+prime\s+number/i.test(stem)) return null;
+
+  function isPrime(n: number): boolean {
+    if (n <= 1) return false;
+    if (n <= 3) return true;
+    if (n % 2 === 0 || n % 3 === 0) return false;
+    for (let i = 5; i * i <= n; i += 6) {
+      if (n % i === 0 || n % (i + 2) === 0) return false;
+    }
+    return true;
+  }
+
+  for (const [letter, text] of Object.entries(options)) {
+    const num = parseInt(text.replace(/[^\d-]/g, ""), 10);
+    if (!isNaN(num) && !isPrime(num)) {
+      return { letter, text, reason: `${num} is not prime` };
+    }
+  }
+  return null;
+}
+
+export function checkPercentageArithmetic(stem: string, options: Record<string, string>): { letter: string; text: string; reason: string } | null {
+  const m = stem.match(/(\d+)%\s*of\s*(\d+)\s*([+\-*])\s*(\d+)%\s*of\s*(\d+)/i);
+  if (!m) return null;
+
+  const p1 = parseFloat(m[1]) / 100 * parseFloat(m[2]);
+  const op = m[3];
+  const p2 = parseFloat(m[4]) / 100 * parseFloat(m[5]);
+  let result = 0;
+  if (op === "+") result = p1 + p2;
+  else if (op === "-") result = p1 - p2;
+  else if (op === "*") result = p1 * p2;
+
+  for (const [letter, text] of Object.entries(options)) {
+    const num = parseFloat(text.replace(/[^\d.-]/g, ""));
+    if (Math.abs(num - result) < 0.001) {
+      return { letter, text, reason: `Exact arithmetic: ${p1} ${op} ${p2} = ${result}` };
+    }
+  }
+  return null;
+}
+
+export function deterministicVerification(stem: string, options: Record<string, string>): { letter: string; text: string; reason: string } | null {
+  return checkDivisibility(stem, options) ||
+         checkRemainder(stem, options) ||
+         checkNotPrime(stem, options) ||
+         checkPercentageArithmetic(stem, options);
+}
+
 export function parseAndValidateMcq(raw: string): ProcessedMcqResult {
   const text = raw.trim();
   if (["NO_MCQ", "UNREADABLE", "INCOMPLETE", "AMBIGUOUS"].includes(text)) {
@@ -278,11 +386,15 @@ export function buildMcqPrompt(config: McqAssistantConfig, imageCount = 1): stri
     "3. Determine completeness for each question independently:",
     "   - COMPLETE: The question stem and its answer choices are sufficiently visible to solve definitively.",
     "   - INCOMPLETE: The question stem or options are clipped, truncated, cut off (e.g. at the bottom of the screenshot), or missing required choices.",
-    "4. For every COMPLETE question, solve it independently. Output the chosen option letter and EXACT visible option text.",
-    "   - Respect NOT, EXCEPT, LEAST, assertion-reason, all/none-of-the-above, and multiple-answer instructions.",
+    "4. SOLVING & REASONING PROTOCOL (CRITICAL):",
+    "   - Solve each complete question independently by thinking step-by-step from first principles in your internal scratchpad.",
+    "   - For mathematics, divisibility, remainders, arithmetic, and quantitative problems: calculate exact numbers from scratch. If asked for 'largest' or 'smallest' satisfying a property, verify that all other candidates do not violate the extremum.",
+    "   - For logical qualifiers: strictly honor NOT, EXCEPT, LEAST, ALWAYS, NEVER.",
+    "   - For code, tables, and logic: trace execution steps, variable mutations, and row values carefully.",
+    "   - Output the chosen option letter and EXACT visible option text.",
     "   - Single answer format: C) exact visible option text",
     "   - Multiple answers format: A) exact text; C) exact text",
-    "   - Never invent options, alter option letters, or add explanations or reasoning.",
+    "   - Never invent options, alter option letters, or output scratchpad thoughts in the final response.",
     "5. For any INCOMPLETE question, mark it INCOMPLETE (e.g. 3. INCOMPLETE). Never let an incomplete question prevent answering other complete questions.",
     "6. FORMAT YOUR RESPONSE:",
     "   Provide each question on its own line in order, like this:",
@@ -300,19 +412,23 @@ export function buildMcqPrompt(config: McqAssistantConfig, imageCount = 1): stri
   ].filter(Boolean).join("\n");
 }
 
-const defaultCompletionRunner: McqCompletionRunner = async ({ apiKey, model, images, prompt, signal, maxTokens = 1024 }) => {
+const defaultCompletionRunner: McqCompletionRunner = async ({ apiKey, model, images, prompt, signal, maxTokens = 2048 }) => {
   const client = new Groq({ apiKey });
   const content: any[] = [{ type: "text", text: prompt }];
   for (const image of images) {
     content.push({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.imageBase64}` } });
   }
-  const response: any = await client.chat.completions.create({
+  const params: any = {
     model,
     messages: [{ role: "user", content }],
     max_tokens: maxTokens,
     temperature: 0,
     reasoning_format: "hidden",
-  }, { signal });
+  };
+  if (model.includes("qwen") || model === "qwen/qwen3.8-27b") {
+    params.reasoning_effort = "high";
+  }
+  const response: any = await client.chat.completions.create(params, { signal });
   return response?.choices?.[0]?.message?.content || "";
 };
 
@@ -335,7 +451,7 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
   if (images.length <= MAX_IMAGES_PER_MODEL_REQUEST) {
     return runWithTimeout(runner, {
       apiKey, model, images, imageBase64: images[0]?.imageBase64, mimeType: images[0]?.mimeType,
-      prompt: buildMcqPrompt(config, images.length), maxTokens: 1024,
+      prompt: buildMcqPrompt(config, images.length), maxTokens: 2048,
     });
   }
 
@@ -350,7 +466,7 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
         "Transcribe only visible question stems with question numbers, passage text, option letters and exact option text, formulas, code indentation, and objective chart/diagram/table labels.",
         "Note continuation and overlap with adjacent captures. Do not solve and do not infer missing content.",
       ].join("\n"),
-      maxTokens: 1024,
+      maxTokens: 2048,
     });
     if (!observation.trim()) throw new Error(`Empty observation for image batch ${batchNumber}`);
     observations.push(`[ORDERED BATCH ${batchNumber}]\n${observation.trim()}`);
@@ -358,7 +474,7 @@ async function analyzeWithModel(apiKey: string, model: string, images: McqImageI
   return runWithTimeout(runner, {
     apiKey, model, images: [],
     prompt: `${buildMcqPrompt(config, images.length)}\n\nOrdered visual observations:\n${observations.join("\n\n")}`,
-    maxTokens: 1024,
+    maxTokens: 2048,
   });
 }
 

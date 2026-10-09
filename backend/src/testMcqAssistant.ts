@@ -4,6 +4,11 @@ import {
   analyzeMcqScreenshot,
   validateMcqAnswer,
   parseAndValidateMcq,
+  checkDivisibility,
+  checkRemainder,
+  checkNotPrime,
+  checkPercentageArithmetic,
+  deterministicVerification,
   type McqCompletionRunner,
 } from "./services/mcqAssistantService";
 import { requireMcqAssistantAdmin } from "./middleware/mcqAssistantAuth";
@@ -35,6 +40,35 @@ async function run() {
   assert.equal(validateMcqAnswer("A) First option; C) Third option"), "A) First option; C) Third option");
   assert.equal(validateMcqAnswer("The correct answer is C"), null);
   assert.equal(validateMcqAnswer("C) XGBoost\nBecause it is correct"), null);
+
+  // ── Stage C: Deterministic Math Verification Tests ──
+  const divTest = deterministicVerification("The largest 4 digit number exactly divisible by 88 is:", {
+    A: "9944", B: "9768", C: "9988", D: "8888", E: "None of these"
+  });
+  assert.ok(divTest);
+  assert.equal(divTest.letter, "A");
+  assert.equal(divTest.text, "9944");
+
+  const remTest = deterministicVerification("On dividing a number by 357, we get 39 as remainder. On dividing the same number by 17, what will be the remainder?", {
+    A: "0", B: "3", C: "5", D: "11"
+  });
+  assert.ok(remTest);
+  assert.equal(remTest.letter, "C");
+  assert.equal(remTest.text, "5");
+
+  const primeTest = deterministicVerification("Which of the following numbers is NOT a prime number?", {
+    A: "31", B: "61", C: "71", D: "91"
+  });
+  assert.ok(primeTest);
+  assert.equal(primeTest.letter, "D");
+  assert.equal(primeTest.text, "91");
+
+  const percentTest = deterministicVerification("What is the value of 15% of 160 + 25% of 80?", {
+    A: "40", B: "42", C: "44", D: "46", E: "48"
+  });
+  assert.ok(percentTest);
+  assert.equal(percentTest.letter, "C");
+  assert.equal(percentTest.text, "44");
 
   // ── Exact Mandatory Regression Fixture ──
   // Question 1: "The largest 4 digit number exactly divisible by 88 is:" -> 1. A) 9944
